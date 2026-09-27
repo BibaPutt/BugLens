@@ -4,7 +4,7 @@
 
 # BugLens
 
-### AI-powered code review, right inside VS Code
+### AI-powered code review, right inside IDE
 
 [![Version](https://img.shields.io/badge/version-0.10.0-6366f1?style=flat-square)](https://marketplace.visualstudio.com/items?itemName=VanshDev.buglens)
 [![Marketplace](https://img.shields.io/visual-studio-marketplace/i/VanshDev.buglens?style=flat-square&label=installs&color=22c55e)](https://marketplace.visualstudio.com/items?itemName=VanshDev.buglens)
