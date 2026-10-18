@@ -77,6 +77,27 @@ async def test_review_pr_dry_run_keeps_only_verified_findings(monkeypatch, db):
     assert res.score == 88
 
 
+async def test_review_pr_merges_deterministic_linter_findings(monkeypatch, db):
+    import json
+
+    from buglens import adapters
+
+    monkeypatch.setattr(llm, "complete_json", _fake_llm)
+    _patch_github(monkeypatch, [{"filename": "a.py", "status": "modified", "patch": PATCH}])
+    monkeypatch.setattr(adapters, "_installed", lambda a: True)
+    monkeypatch.setattr(adapters, "_run", lambda *a, **k: json.dumps([
+        {"code": "F821", "message": "undefined name", "location": {"row": 2, "column": 1}},
+    ]))
+    rules = load_rules()
+    rules.linters = ["ruff"]
+
+    res = await pipeline.review_pr("o", "r", 1, dry_run=True, db=db, rules=rules)
+
+    assert "lint" in res.lenses_run
+    assert any(f.get("linter") == "ruff" and f.get("deterministic") for f in res.findings)
+    assert any("linters: ruff" in n for n in res.engine_notes)
+
+
 async def test_review_pr_is_idempotent_per_revision(monkeypatch, db):
     monkeypatch.setattr(llm, "complete_json", _fake_llm)
     _patch_github(monkeypatch, [{"filename": "a.py", "status": "modified", "patch": PATCH}])
@@ -565,11 +586,14 @@ def test_engine_notes_disclose_depth_changes():
         kept = [1, 2, 3, 4, 5, 6, 7]
         dropped = [1, 2]
 
-    notes = pipeline._engine_notes(rules, V, [{"deterministic": True}], True, 120, True, 8, 2, True)
+    notes = pipeline._engine_notes(rules, V, [{"lens": "secrets", "deterministic": True}], True, 120, True, 8, 2, True)
     blob = " | ".join(notes)
     assert "consensus 3 passes" in blob
     assert "verify dropped 2 of 9" in blob
     assert "secret scan flagged" in blob
+    lint_notes = pipeline._engine_notes(rules, V, [], False, 0, False, 1, 0, False,
+                                        linters_run=["ruff", "eslint"])
+    assert any("linters: ruff, eslint" in n for n in lint_notes)
     assert "linked-ticket check" in blob
     assert "code graph: 120" in blob
     assert "partial: 2/8" in blob

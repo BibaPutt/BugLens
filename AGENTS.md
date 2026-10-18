@@ -11,7 +11,8 @@ BugLens is a code-review product with three surfaces:
 3. **Dashboard** (`BugAnalytics.html`) + FastAPI backend (`backend/`).
 
 Repo: `github.com/Vansh940/BugLens`. Local branch for all v2 work: **`enhance/v2-engine`**.
-**Never push to `main`.** Commit locally only, and only when the user asks.
+**Never push to `main`.** Commit locally **as each wave lands**; run `git push` only when the
+user says **"final"**. Never print or commit the token.
 
 ## Ground rules (locked by the user)
 - **Provider-agnostic LLM.** OpenAI-compatible API. Default provider Groq; `OPENAI_BASE_URL`
@@ -35,6 +36,7 @@ Repo: `github.com/Vansh940/BugLens`. Local branch for all v2 work: **`enhance/v2
 | `prompts.py` | review/verify/summary prompts; untrusted-data fencing |
 | `verify.py` | machine gate (line exists in diff, evidence quoted) + bounded model gate |
 | `secretscan.py` | deterministic regex secret scanner; ground-truth findings, masked, bypass model gate |
+| `adapters.py` | deterministic linters/SAST (ruff, bandit, eslint, node-syntax, shellcheck, hadolint, rubocop, yamllint, php-syntax); ground-truth findings, capped to added lines, bypass model gate, opt-in via `linters:` |
 | `tickets.py` | linked-issue parse (keyword set) + acceptance-criteria extraction + ticket prompt block |
 | `indexer.py` | persistent code graph: stdlib-`ast`/regex parse, incremental `repo_index`, import graph, tests, PageRank retrieval, bounded context pack |
 | `recall.py` | prior-review/prior-PR recall: past findings by path (+ outcomes), dismissals, `file_prs` history, bounded recall block |
@@ -60,14 +62,14 @@ Wiring: `routers/webhook.py` → `pipeline.review_pr`; `routers/review.py` → `
 - [x] Phase 5: ITERATION.md loop (commits still pending explicit user ask)
 - [ ] Phase 6: **critique vs competitors** (Cursor Bugbot, CodeRabbit, Greptile + the 19 OSS
       bots in `../temp/pr-review-bots/`): read their prompts/features/UI/issues and fold in wins.
-      Live log in `ITERATION.md`. *(iterations 3–13 shipped consensus, resolution rate,
+      Live log in `ITERATION.md`. *(iterations 3–17 shipped consensus, resolution rate,
       reaction feedback, walkthrough, file cache, secret scanner, ticket/spec validation,
       persistent code graph, prior-review recall, layered base-branch rules, IDE
       repo-awareness; iteration 14 = scale/no-waste; iteration 15 = reliability; iteration 16 =
-      cost+activation disclosure footer and re-review round cap/convergence. Next (learning
-      wave, `temp/intel/buglens-pr-review-learning-2026-10.md`): position-drift gate →
-      pre-mortem + depth triggers → risk-tier header/L0–L3 + surprise detector → verifier
-      rationale persistence. Pre-merge checks + inline reply chat still open)*
+      cost+activation disclosure footer and re-review round cap/convergence; iteration 17 (Wave A)
+      = deterministic adapters + anchor re-anchor gate + check-run lite. **Full plan:
+      `../temp/intel/buglens-v2-beat-plan-2026-10.md` (Waves A–J).** Pre-merge checks + inline
+      reply chat still open)*
 
 ## Folding in competitor features (Phase 6, ongoing)
 Already lifted from the space: one-click **suggestion blocks** (Vercel openreview),
@@ -147,6 +149,24 @@ identity. `POST /api/v1/feedback` and `/engine/stats?repo=` expect `owner/repo`.
   whole hunk + the `pr_round_files` ledger (`first_round<round_no`); keep it deterministic.
 - The round-cap note uses its own marker (`pipeline.MARKER_CAP`); the convergence note reuses
   `MARKER` (it *is* the current review).
+
+## Deterministic adapters + anchor gate (iteration 17, do not regress)
+- **Adapters are opt-in and must never be required.** `linters` defaults to `[]` (off);
+  `["auto"]` detects installed tools; you can also name them. A missing tool is a **no-op,
+  never an error** and never fails a review. Subprocess only, **no shell**, bounded by
+  `BUGLENS_LINTER_TIMEOUT` (default 25s). Never add a required service or a Docker dependency.
+- **Ground-truth findings still obey the added-line rule.** Adapter hits set
+  `deterministic=True` / `confidence=1.0` and bypass the **model** gate (like `secretscan.py`),
+  but they are dropped unless the line is one the PR added. Never let a tool hit point at an
+  unchanged line.
+- **Anchors re-anchor, they never guess.** `diff.anchor_to_evidence(fd, quote, prefer, min_chars)`
+  snaps a finding to the line containing its quoted evidence and records `line_drift`
+  (`verify.machine_gate`); if the quote is absent the finding is still dropped. Never post an
+  inline comment on a line we cannot prove.
+- **Check runs never block by default.** `check_run_conclusion` defaults to `neutral`; a
+  `failure` conclusion is only emitted when `required_status_check: true`.
+- Adapters must surface in the footer as `linters: <names>` (iteration-16 "name every depth
+  change" rule).
 
 ## Performance work (how to do it here)
 Measure first, with a reproducible harness: `cd backend; python bench.py` (medians of

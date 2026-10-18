@@ -92,6 +92,10 @@ processes; without it they are per-process, which is correct for a single-instan
   consolidated review per revision.
 - If the model errors, findings are dropped rather than posted unverified. The
   deterministic secret scanner still reports, because it does not depend on the model.
+- **Adapters never fail a review.** Deterministic linters/SAST (`linters:` in `.buglens.yml`)
+  run as **local subprocesses** (no Docker, no WSL). A missing binary is skipped, and a
+  crashed or timed-out adapter (`BUGLENS_LINTER_TIMEOUT`, default 25s) contributes nothing and
+  cannot affect the model findings. The adapters that ran are named in the review footer.
 - **A review that could not run says so.** If *every* model call fails, BugLens posts
   "review could not run" and records the run as `incomplete`. It does not report a clean
   pass for a review that never happened.
@@ -113,4 +117,5 @@ processes; without it they are per-process, which is correct for a single-instan
 | `no such table: runs` | the app was started without its lifespan running (engine store never initialised) |
 | First request slow | free-tier hosts sleep; the first request wakes the instance |
 | Comment volume too high | lower `max_comments`, raise `min_severity`, or set `skip_nits: true` |
+| No adapter findings | the tool is not installed, or `linters` is unset (`[]`). Set `linters: [ruff]` or `auto` and install the binary |
 | A finding keeps appearing after fixes | reaction feedback never reached the server. Check the webhook receives `reaction` events |

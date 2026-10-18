@@ -22,7 +22,7 @@ import uuid
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 
-from . import github, indexer, llm, prompts, recall, secretscan, store, tickets, verify
+from . import adapters, github, indexer, llm, prompts, recall, secretscan, store, tickets, verify
 from . import lenses as L
 from .context import build_context, extract_symbols, language_of
 from .diff import FileDiff, DiffLine, ADD, choose_paths, parse_patch
@@ -252,7 +252,7 @@ def _engine_stats(usage: dict, wall: float) -> str:
 
 def _engine_notes(rules: Rules, verified, all_findings: list[dict],
                   ticket: bool, graph_files: int, recall: bool, calls: int, failures: int,
-                  converging: bool) -> list[str]:
+                  converging: bool, linters_run: list[str] | None = None) -> list[str]:
     """Plain-language disclosure of every optional layer that changed review depth.
 
     No feature may alter review depth silently, the non-consensual-defaults lesson."""
@@ -264,8 +264,10 @@ def _engine_notes(rules: Rules, verified, all_findings: list[dict],
     elif verified.dropped:
         notes.append(f"verify dropped {len(verified.dropped)} of "
                      f"{len(verified.kept) + len(verified.dropped)} candidate(s)")
-    if any(f.get("deterministic") for f in all_findings):
+    if any(f.get("lens") == "secrets" for f in all_findings):
         notes.append("secret scan flagged")
+    if linters_run:
+        notes.append("linters: " + ", ".join(linters_run))
     if ticket:
         notes.append("linked-ticket check")
     if graph_files:
@@ -952,6 +954,15 @@ async def _review_pr(owner: str, repo: str, pr_number: int, *, base_sha: str | N
     if any(f.get("deterministic") for f in all_findings):
         lenses_run.add("secrets")
 
+    # Deterministic linters/SAST: the repo's own tools, offline, free, and never
+    # vote-suppressed. Off unless `.buglens.yml` opts in (`linters: auto` or a list).
+    lint_findings, linters_run = adapters.scan(
+        file_texts, {fd.path: fd for fd in picked}, getattr(rules, "linters", [])
+    )
+    if lint_findings:
+        all_findings.extend(lint_findings)
+        lenses_run.add("lint")
+
     # PR-level merge gate
     if picked:
         mf, mp, mu = await _run_merge_lens(picked, rules, pr_info, statuses)
@@ -1027,7 +1038,8 @@ async def _review_pr(owner: str, repo: str, pr_number: int, *, base_sha: str | N
         round_no=round_no,
         converging=converging,
         engine_notes=_engine_notes(rules, verified, all_findings, bool(ticket_block),
-                                   graph_files, bool(recall_text), calls, failures, converging),
+                                   graph_files, bool(recall_text), calls, failures, converging,
+                                   linters_run=linters_run),
     )
 
     try:                                   # findings are best-effort; never cost the review
@@ -1064,10 +1076,19 @@ async def _review_pr(owner: str, repo: str, pr_number: int, *, base_sha: str | N
     if res.posted:
         await store.mark_posted(run_id, db)
     if rules.post_check_run and head_sha:
+        # A check run can gate merges only when the operator asked for it. `failure` is
+        # never reachable unless `required_status_check` is true, so the bot stays
+        # non-blocking by default even with the check run switched on.
+        conclusion = str(getattr(rules, "check_run_conclusion", "neutral") or "neutral").lower()
+        if conclusion not in ("neutral", "success", "failure", "action_required"):
+            conclusion = "neutral"
+        if conclusion == "failure" and not getattr(rules, "required_status_check", False):
+            conclusion = "neutral"
+        name = getattr(rules, "check_run_name", None) or "BugLens"
         try:
             await github.create_check_run(
-                owner, repo, head_sha, "BugLens", "neutral",
-                f"BugLens: {res.verdict} ({res.score}/100)", res.summary,
+                owner, repo, head_sha, name, conclusion,
+                f"{name}: {res.verdict} ({res.score}/100)", res.summary,
             )
         except Exception:
             pass  # a status check is a nicety, never a reason to fail the review
@@ -1181,6 +1202,10 @@ async def review_snippet(code: str, language: str, filename: str = "snippet",
     findings, positives, usage, names = await _review_file(
         fd, lenses, rules, context_block, related_block, [], sem
     )
+    lint_findings, linters_run = adapters.scan({fd.path: code}, {fd.path: fd}, getattr(rules, "linters", []))
+    if lint_findings:
+        findings.extend(lint_findings)
+        names = [*names, "lint"]
     findings = _dedupe(findings)
     verified = await verify.verify_all(findings, {fd.path: fd}, rules)
     kept, over = sev.budget(verified.kept, rules.max_comments, rules.min_severity)
@@ -1202,7 +1227,7 @@ async def review_snippet(code: str, language: str, filename: str = "snippet",
         review_effort=_review_effort([fd]),
         wall_seconds=time.monotonic() - t0,
         engine_notes=_engine_notes(rules, verified, findings, False, 0, bool(related_block),
-                                   calls, failures, False),
+                                   calls, failures, False, linters_run=linters_run),
     )
 
 

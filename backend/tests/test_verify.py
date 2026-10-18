@@ -57,6 +57,24 @@ def test_machine_gate_keeps_real_finding_and_snaps_line():
     assert ok and f["line"] == 2
 
 
+def test_machine_gate_reanchors_to_evidence_line():
+    fd = _fd()
+    rules = load_rules()
+    # model reported line 3 (context) but the evidence lives on added line 2
+    f = _finding(line=3)
+    ok, _ = verify.machine_gate(f, fd, rules)
+    assert ok and f["line"] == 2 and f.get("line_drift") == -1
+
+
+def test_machine_gate_reanchors_beyond_snap_tolerance():
+    patch = "@@ -1,1 +1,60 @@\n x = 1\n" + "".join(f"+line {i}\n" for i in range(2, 40)) + "+bad = eval(user_input)\n"
+    fd = parse_patch(patch, "a.py")
+    rules = load_rules()
+    f = _finding(line=2)          # 38 lines away, outside snap tolerance, but evidence matches
+    ok, _ = verify.machine_gate(f, fd, rules)
+    assert ok and f["line"] == 40
+
+
 async def test_verify_all_without_model_gate():
     fd = _fd()
     rules = load_rules()

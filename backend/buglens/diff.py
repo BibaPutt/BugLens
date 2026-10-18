@@ -114,6 +114,27 @@ def snap_to_added(fd: FileDiff, line: int | None, tolerance: int = 6) -> int | N
     return best if abs(best - line) <= tolerance else None
 
 
+def anchor_to_evidence(fd: FileDiff, quote: str, prefer: int | None = None, min_chars: int = 8) -> int | None:
+    """The added line that actually contains the finding's quoted evidence.
+
+    This is the position-drift gate: a model can quote the right line but report the
+    wrong line number, and a comment pinned to the wrong line is the single most common
+    "this bot is useless" complaint. When the evidence matches an added line we trust
+    that over the reported number. Ties (the same quote on several added lines) resolve
+    to the line closest to what the model claimed.
+    """
+    if not quote or len(quote.strip()) < min_chars:
+        return None
+    needle = re.sub(r"\s+", " ", quote).strip()
+    candidates = [l.new_line for l in fd.added
+                  if l.new_line and needle and needle in re.sub(r"\s+", " ", l.text).strip()]
+    if not candidates:
+        return None
+    if prefer is None:
+        return candidates[0]
+    return min(candidates, key=lambda n: abs(n - prefer))
+
+
 def join_added(fd: FileDiff) -> str:
     return "\n".join(l.text for l in fd.added)
 

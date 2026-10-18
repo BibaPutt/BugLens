@@ -82,6 +82,23 @@ def test_nested_json_config_is_parsed():
     assert rules.skip_nits is False and rules.max_comments == 4
 
 
+# ── iteration 17: deterministic adapters + check-run knobs ────────────────────
+def test_linters_config_forms():
+    assert load_rules().linters == []
+    assert load_rules({".buglens.yml": "linters: auto\n"}).linters == ["auto"]
+    assert load_rules({".buglens.yml": "linters: [Ruff, ESLint]\n"}).linters == ["ruff", "eslint"]
+    assert load_rules({".buglens.yml": "linters:\n  - bandit\n  - hadolint\n"}).linters == ["bandit", "hadolint"]
+
+
+def test_check_run_knobs_default_to_non_blocking():
+    r = load_rules()
+    assert r.post_check_run is False
+    assert r.check_run_conclusion == "neutral"
+    assert r.required_status_check is False
+    r2 = load_rules({".buglens.yml": "post_check_run: true\ncheck_run_conclusion: failure\nrequired_status_check: true\n"})
+    assert r2.post_check_run is True and r2.check_run_conclusion == "failure" and r2.required_status_check is True
+
+
 # ── iteration 16: re-review cap / convergence knobs ───────────────────────────
 def test_round_knobs_load_and_validate():
     from buglens.rules import describe

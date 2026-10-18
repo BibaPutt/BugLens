@@ -16,8 +16,11 @@ it actually does to your diff.
 5. **Recall** prior findings and prior PRs for the changed files, plus their outcomes.
 6. **Review** through lenses. Each lens sees the diff, the repo rules, the code graph pack
    and the recall block. Findings are normalized, de-duplicated by fingerprint, and capped
-   by severity budget.
-7. **Verify**: a machine gate, then a bounded model gate (concurrent, top-N only).
+   by severity budget. Deterministic **adapters** (local linters/SAST, when enabled) run
+   alongside the lenses and contribute ground-truth findings with no model call.
+7. **Verify**: a machine gate (the line exists in the diff, the quoted evidence is actually
+   present, and a drifted anchor is snapped back to its evidence line with the `line_drift`
+   recorded), then a bounded model gate (concurrent, top-N only).
 8. **Post** one consolidated review: inline comments with suggestion blocks, plus a summary
    comment carrying the walkthrough.
 9. **Measure** on merge: re-read the merged files and record whether each finding was fixed.
@@ -47,14 +50,56 @@ BugLens is tuned for precision over volume. A finding is dropped unless:
 - it survives suppression: two net 👎 from your team on that fingerprint and it never
   appears again.
 
-Two classes bypass the model gate because they are ground truth:
+Three classes bypass the model gate because they are ground truth:
 
 - **Deterministic secret scanner**: regex hits on added lines. The value is masked in the
   output and never sent to the model.
+- **Adapter hits**: local linter/SAST output (see **Deterministic linters** below) carries
+  `deterministic=true` and is still capped to added lines.
 - **Ticket criteria**: assertions about your own acceptance criteria, not code claims.
+
+If a finding's line has drifted since it was anchored (force-push, rebase, retarget), the
+machine gate **re-anchors it to the line that actually holds the quoted evidence** and records
+the signed `line_drift`; only if the quote is not in the diff at all is the finding dropped.
+A real finding is never lost and never posted on the wrong line.
 
 `consensus: 3` in `.buglens.yml` runs three shuffled passes and posts only what wins the
 majority. It costs 3x tokens and is off by default.
+
+## Deterministic linters (adapters)
+
+Beyond the model, the engine can run real linters/SAST on the added lines and fold their
+output in as findings. These are **ground truth**: `deterministic=true`, confidence `1.0`,
+and they skip the model gate, so a real bug a tool finds is never argued away by the model.
+They are still capped to lines the PR added, so nothing lands on unchanged code.
+
+All of them are **optional and off by default**:
+
+```yaml
+linters: auto            # [] = off (default); "auto" = any that are installed; or name them
+```
+
+| Adapter | Languages | Notes |
+|---|---|---|
+| `ruff` | Python | lint + a broad rule set |
+| `bandit` | Python | security (SAST) |
+| `eslint` | JavaScript, TypeScript | lint |
+| `node-syntax` | JavaScript | parse-only syntax check |
+| `shellcheck` | Shell, Bash | shell correctness |
+| `hadolint` | Dockerfile | Dockerfile lint |
+| `rubocop` | Ruby | lint |
+| `yamllint` | YAML | lint |
+| `php-syntax` | PHP | parse-only syntax check |
+
+Rules:
+
+- **Missing tool = no-op.** If an adapter's binary is not on `PATH`, it is skipped; it never
+  errors and never fails a review.
+- **Bounded and shell-free.** Each run is a direct subprocess with no shell and a hard timeout
+  (`BUGLENS_LINTER_TIMEOUT`, default 25s).
+- **Stable fingerprints.** An adapter hit is fingerprinted on `(file, rule, line)` so it is
+  de-duplicated and suppressed like any other finding.
+- The set that ran is disclosed in the footer as `linters: ruff, eslint`.
 
 ## Ticket and spec validation
 
@@ -99,7 +144,10 @@ min_severity: low
 verify: true
 skip_nits: true           # no formatting / import-order noise
 consensus: 1              # 2-3 = shuffled passes + majority vote
+linters: auto             # [] = off; "auto" = detect installed; or [ruff, eslint]
 post_check_run: true      # add a neutral BugLens check run
+check_run_conclusion: neutral   # failure only when required_status_check: true
+required_status_check: false
 check_ticket: true        # validate linked issues against the diff
 max_rounds: 10            # stop after this many reviews of one PR (0 = no cap)
 converge_rounds: 3        # from round 4 only re-review files whose diff changed
@@ -147,8 +195,8 @@ Every consolidated review ends with a compact `Engine:` line: engine calls, fail
 tokens (only if the provider reported them), an optional dollar figure (only if
 `BUGLENS_COST_PER_1M_IN`/`_OUT` are set) and wall-clock, plus a plain line naming every
 optional layer that changed review depth (consensus passes, verify drop stats, secret scan,
-linked-ticket check, code graph, prior-review recall, and any partial call failures). Nothing
-that changes how deep we looked happens silently, and no number is invented.
+adapter linters, linked-ticket check, code graph, prior-review recall, and any partial call
+failures). Nothing that changes how deep we looked happens silently, and no number is invented.
 
 Re-review discipline keeps the loop bounded: past `converge_rounds` a PR is only re-reviewed
 where the diff actually changed (deterministic content hash, **no model calls** when nothing

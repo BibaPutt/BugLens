@@ -58,6 +58,7 @@ a placeholder key.
 | `BUGLENS_SWEEP_HOURS` | `24` | interval between cache/index sweeps |
 | `BUGLENS_COST_PER_1M_IN` | unset | $ per 1M input tokens; enables the cost figure in the review footer |
 | `BUGLENS_COST_PER_1M_OUT` | unset | $ per 1M output tokens (used with the above) |
+| `BUGLENS_LINTER_TIMEOUT` | `25` | seconds before an adapter subprocess is killed |
 
 The footer always reports engine calls, failed calls, tokens (when the provider returns them)
 and wall-clock; a **dollar figure appears only when both cost variables are set**, so the bot
@@ -101,9 +102,28 @@ been reviewed that many times, and `converge_rounds` (default `3`) switches to *
 reviews after that many rounds (deterministic: a file is only re-reviewed if its diff actually
 changed). Set either to `0` to disable it.
 
+### Deterministic linters
+
+Run real linters/SAST locally and fold their output in as **ground-truth findings** (they skip
+the model gate and are still capped to added lines). Off by default:
+
+```yaml
+linters: auto                    # [] = off; "auto" = detect installed; or [ruff, eslint]
+post_check_run: true             # one check run per review (off by default)
+check_run_conclusion: neutral    # a "failure" conclusion only when required_status_check: true
+required_status_check: false
+```
+
+Adapters: `ruff`, `bandit` (Python), `eslint`, `node-syntax` (JS/TS), `shellcheck` (Shell),
+`hadolint` (Dockerfile), `rubocop` (Ruby), `yamllint`, `php-syntax`. A missing tool is skipped,
+never an error. No Docker and no WSL: they run as local subprocesses (timeout
+`BUGLENS_LINTER_TIMEOUT`, default 25s). Full detail in
+[engine.md](engine.md#deterministic-linters-adapters).
+
 ## Supported languages
 
 Python, JavaScript, TypeScript, Java, Go, Rust, C, C++, C#, Ruby, PHP, Swift, Dart, Kotlin,
 Scala, HTML, CSS, SCSS, SQL, Bash, Shell, YAML, JSON, Elixir, Haskell, Clojure, R, Julia, Lua
 and more. The diff parser is language-agnostic; the code graph uses Python's `ast` and a
-regex fallback elsewhere.
+regex fallback elsewhere. With `linters` enabled, the adapters above run deterministic
+linters/SAST on top of the model for the languages they cover.

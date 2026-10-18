@@ -65,10 +65,13 @@ read this, do one iteration from "Backlog", append to "Iteration log", commit.**
     reviews, and `GET /api/v1/engine/repos` feeds the dashboard picker.
 14. ~~**Cost + activation disclosure footer**~~ **Shipped (iteration 16):** see below.
 15. ~~**Re-review round cap + convergence discipline**~~ **Shipped (iteration 16):** see below.
-16. **Comment-location verification gate (position drift).** Every inline finding must resolve
-    to a real hunk in the *current* revision; a stale anchor (force-push, retarget) re-anchors
-    to ±3 changed lines or downgrades to summary level, never a wrong-line inline comment.
-    Pure-deterministic, no LLM. *Learning-wave #11.*
+16. ~~**Comment-location verification gate (position drift).**~~ **Shipped (iteration 17):**
+    `diff.anchor_to_evidence` + `verify.machine_gate` re-anchor a drifted finding to its evidence
+    line (recording `line_drift`) or drop it, never a wrong-line inline comment. Pure-deterministic,
+    no LLM. *Learning-wave #11.*
+
+> **Full multi-wave plan:** `temp/intel/buglens-v2-beat-plan-2026-10.md` (Wave A done here; the
+> remaining waves are the ranked backlog items 17-21 plus the beat-designs in that file).
 17. **Pre-mortem section + quick/deep depth triggers.** A bounded 2–4 item "what fails in
     production" narrative, each traced to a diff line, gated by `depth_triggers` (new public
     route, migration, >300 lines) so typo-fix PRs stay quick. *Learning-wave #9/#8.*
@@ -101,6 +104,30 @@ read this, do one iteration from "Backlog", append to "Iteration log", commit.**
 | 14 | 2026-10-18 | **Scale + no-waste pass** (measure → fix → re-measure with `backend/bench.py`): SQLite **WAL + busy_timeout + bounded connection pool** (was one connect/thread per store call), batched `put_index_many`/`prune_index`, single-query `known_repos` + `recent_prs_for_paths`; **global review admission control** (`MAX_ACTIVE_REVIEWS`) + per-repo lock; **shared keep-alive HTTP pool** for the LLM (was a client per call); concurrent verify gates (was one round-trip per finding); **quadratic `build_graph` replaced by dictionary lookups** (9.4s → ~30ms on 2000 files, equivalence-tested); docs split into `docs/`, README cut to ~90 lines | Industry-standard patterns: WAL/connection pooling, bounded concurrency, admission control, keep-alive pooling, removing O(n²) | 110 tests pass (`test_indexer` graph equivalence, `test_store` WAL/bounded-pool/concurrent-writers), boot smoke |
 | 15 | 2026-10-18 | **Reliability pass on the architecture review** (every claim verified against code first): *hollow review* fixed: a failed lens call returned an error dict that `_merge_usage` silently dropped, so a total provider outage posted `looks-good/100`; now calls/errors are counted and an all-failed review posts "could not run" and records `incomplete`. Also: **abandoned-run recovery** (`BUGLENS_STALE_RUN_MIN`, a crashed claim no longer blocks the revision forever), **signed fingerprint markers** (HMAC: a forged `<!-- buglens:fp=… -->` can no longer poison suppression), **shared GitHub HTTP pool** (was a client per call), **parallel file fetches** (20–30 sequential round-trips → bounded gather), **exact in-process code-graph cache** (22 ms → ~1 ms, versioned by a DB write counter), **bounded per-repo locks** (were retained forever), **paginated comment upsert** (>100 comments duplicated the summary), **`save_findings` no longer fatal**, **daily sweep** for file-cache/repo-index growth | Principal-engineer review of the codebase; standard reliability patterns (fail loud, reclaim stale work, authenticate feedback, keep-alive pooling, bound everything, invalidate caches exactly) | 120 tests pass (`test_pipeline` incomplete-review/cache/locks/concurrent-fetch, `test_store` stale-claim/sweep/version, `test_webhook` forged-marker rejection), boot smoke |
 | 16 | 2026-10-18 | **Honesty + convergence pass** (from the 13-post PR-review learning wave, `temp/intel/buglens-pr-review-learning-2026-10.md`): every consolidated review now ends with an **`Engine:` cost line**: calls, failures, tokens (only when the provider reports them) and wall-clock, with a **dollar figure only when `BUGLENS_COST_PER_1M_IN/_OUT` are set** (never invented), plus a plain line disclosing every optional layer that changed depth (consensus N, verify stats, secret scan, ticket check, code graph, recall, partial failures). **Re-review discipline**: `max_rounds` (10) and `converge_rounds` (3) in `.buglens.yml`: past `converge_rounds` only files whose reviewed content changed are re-reviewed (deterministic content hash, `pr_round_files` ledger), and past `max_rounds` a round-cap note is upserted and the bot stops (the agent-writes / agent-reviews loop is the documented #1 cost sink) | Learning wave: usage-trust backlash (#5), revert-rate guardrail (#3), Codex denial circuit-breaker (#4), Cursor sub-4-min budget (#12) | 132 tests pass (`test_pipeline` footer/round-cap/convergence, `test_store` round ledger, `test_rules` knobs), boot smoke |
+
+| 17 | 2026-10-19 | **Wave A of the beat-plan** (`temp/intel/buglens-v2-beat-plan-2026-10.md`): **deterministic adapter layer** (`adapters.py`: ruff, bandit, eslint, node-syntax, shellcheck, hadolint, rubocop, yamllint, php-syntax) whose hits post as ground-truth findings (`deterministic=True`, confidence 1.0) that bypass the model gate and are capped to added lines; **anchor re-anchor gate** (`diff.anchor_to_evidence` + `verify.machine_gate`): a drifted line snaps to its evidence quote and records `line_drift` instead of being dropped or posted on a wrong line; **check-run lite** (`post_check_run` / `check_run_conclusion` / `required_status_check`, fail-safe `neutral`); new `.buglens.yml` keys `linters` / `check_run_*` | Beat-plan Wave A; CodeRabbit "40+ scanners", reviewdog (MIT) adapter pattern, pr-agent | 145 tests pass (`test_adapters`, `test_verify` anchor, `test_rules`, `test_pipeline` lint merge) |
+
+## Deterministic adapters + anchor gate (iteration 17)
+Wave A of the beat-plan: ground-truth tool output, and no more wrong-line comments.
+
+- **Adapters (`adapters.py`).** Local linters/SAST, one per language, all optional and **off by
+  default** (`linters:` in `.buglens.yml`): `ruff`, `bandit` (Python), `eslint` (JS/TS),
+  `node-syntax`, `shellcheck` (Bash), `hadolint` (Dockerfile), `rubocop` (Ruby), `yamllint`,
+  `php-syntax`. `linters: auto` detects which are installed. Hits are findings with
+  `deterministic=True`, `confidence=1.0`, `linter=<tool>`; they bypass the **model** gate (like
+  the secret scanner) but are still **capped to lines the PR added**. A missing tool is a no-op,
+  never an error; each run is a bounded subprocess (no shell) with `BUGLENS_LINTER_TIMEOUT`
+  (default 25s).
+- **Anchor gate (`diff.anchor_to_evidence`).** When a finding's line number drifts from its
+  quoted evidence (force-push, rebase, retarget), `verify.machine_gate` re-anchors it to the line
+  that actually contains the quote and records the signed `line_drift`, instead of dropping a real
+  finding or posting it on a wrong line. If the quote is not in the diff at all, the finding is
+  still dropped (evidence rule unchanged).
+- **Check-run lite.** `post_check_run` (default false) posts one check run per review;
+  `check_run_conclusion` defaults to `neutral`; a `failure` conclusion is only emitted when
+  `required_status_check: true`, so the default can never block a PR.
+- Adapters are disclosed in the footer as `linters: ruff, eslint` (the "name every depth change"
+  rule from iteration 16).
 
 ## Cost honesty + convergence discipline (iteration 16)
 Two failure modes the whole 2026 field converged on: **nobody trusts usage they cannot see**,

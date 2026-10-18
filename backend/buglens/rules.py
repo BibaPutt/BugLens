@@ -26,6 +26,10 @@ DEFAULTS = {
     "skip_bot_prs": True,
     "skip_nits": True,
     "post_check_run": False,
+    "check_run_name": "BugLens",
+    "check_run_conclusion": "neutral",
+    "required_status_check": False,
+    "linters": [],
     "require_evidence": True,
     "summary_only": False,
     "check_ticket": True,
@@ -47,6 +51,10 @@ class Rules:
     skip_bot_prs: bool = True
     skip_nits: bool = True
     post_check_run: bool = False
+    check_run_name: str = "BugLens"
+    check_run_conclusion: str = "neutral"   # neutral | success | failure; failure needs required_status_check
+    required_status_check: bool = False
+    linters: list[str] = field(default_factory=list)   # [] off, ["auto"] all installed, or names
     require_evidence: bool = True
     summary_only: bool = False
     check_ticket: bool = True
@@ -157,12 +165,16 @@ def _to_rules(data: dict, source: str) -> Rules:
             for k in known:
                 setattr(r, k, getattr(inner, k))
     # lists may arrive as comma strings from the subset parser
-    for listkey in ("ignore_paths", "focus", "custom_rules"):
+    for listkey in ("ignore_paths", "focus", "custom_rules", "linters"):
         v = getattr(r, listkey)
         if isinstance(v, str):
             setattr(r, listkey, [p.strip() for p in v.split(",") if p.strip()])
+        elif isinstance(v, bool):
+            # `linters: true` in YAML means "auto", `false` means off.
+            setattr(r, listkey, ["auto"] if v and listkey == "linters" else [])
         elif isinstance(v, list):
             setattr(r, listkey, [_coerce(x) for x in v])
+    r.linters = [str(x).strip().lower() for x in r.linters if str(x).strip()]
     if not isinstance(r.language_hints, dict):
         r.language_hints = {}
     if r.max_comments < 1:
@@ -284,6 +296,10 @@ def describe(rules: Rules) -> dict:
         "skip_nits": rules.skip_nits,
         "max_rounds": rules.max_rounds,
         "converge_rounds": rules.converge_rounds,
+        "linters": rules.linters,
+        "post_check_run": rules.post_check_run,
+        "check_run_conclusion": rules.check_run_conclusion,
+        "required_status_check": rules.required_status_check,
         "ignore_paths": rules.ignore_paths,
         "focus": rules.focus,
         "custom_rules": rules.custom_rules,

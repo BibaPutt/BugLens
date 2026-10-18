@@ -17,7 +17,7 @@ import os
 from dataclasses import dataclass
 
 from . import llm, prompts
-from .diff import FileDiff, added_text_contains, fingerprint, snap_to_added
+from .diff import FileDiff, added_text_contains, anchor_to_evidence, fingerprint, snap_to_added
 from .rules import Rules
 from .severity import normalize, normalize_category
 
@@ -85,10 +85,19 @@ def machine_gate(finding: dict, fd: FileDiff, rules: Rules) -> tuple[bool, str]:
             return False, "no/too-short evidence quote"
         if not added_text_contains(fd, finding["evidence"]):
             return False, "evidence not present in the diff"
-    snapped = snap_to_added(fd, finding["line"])
-    if finding["line"] is not None and snapped is None:
-        return False, "reported line is not an added line of this file"
-    finding["line"] = snapped if snapped is not None else finding["line"]
+    # Position-drift gate: prefer the line the evidence actually comes from over the
+    # number the model reported. Only fall back to proximity snapping when the quote
+    # matches no added line (masked deterministic findings, ticket verdicts).
+    anchored = anchor_to_evidence(fd, finding.get("evidence"), prefer=finding["line"])
+    if anchored is not None:
+        if finding["line"] is not None and finding["line"] != anchored:
+            finding["line_drift"] = anchored - finding["line"]
+        finding["line"] = anchored
+    else:
+        snapped = snap_to_added(fd, finding["line"])
+        if finding["line"] is not None and snapped is None:
+            return False, "reported line is not an added line of this file"
+        finding["line"] = snapped if snapped is not None else finding["line"]
     if finding["confidence"] < 0.35:
         return False, "confidence below floor"
     return True, ""
