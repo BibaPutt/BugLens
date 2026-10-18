@@ -116,6 +116,15 @@ read this, do one iteration from "Backlog", append to "Iteration log", commit.**
 | 22 | 2026-10-19 | **Wave F (W8-full)**: **check-run parity with annotations** (`checks.py` pure mapper; `github.create_check_run`/`update_check_run`/`find_check_run`; `check_run_input` / `check_run_grouping` / `check_run_max_annotations` keys): findings become check annotations (severity→level), chunked 50 per call, three output modes, one check by default or per-lens opt-in, `failure` only when `required_status_check` | Beat-plan Wave F; matches CodeRabbit/Greptile Checks UI; needs a GitHub App, fail-soft on a PAT | 224 tests pass (`test_checks`, `test_github_checks`, pipeline check-run tests new) |
 | 23 | 2026-10-19 | **Wave G (W9)**: **code-object lensing** (`objects.py` pure units; `sev.apply_lens_caps`; `lens_caps` key): findings are grouped by the symbol they change and tagged with it (`<file>` fallback), and an opt-in per-lens cap stops one noisy lens from consuming the whole comment budget | Beat-plan Wave G; sharper grouping and a precision lever that never blocks | 238 tests pass (`test_objects`; severity + pipeline tests new) |
 | 24 | 2026-10-19 | **Wave H (W10)**: **ticket + production context** (`prodcontext.py` pure link/render; `integrations.py` optional self-hosted fetchers; `external_context` key): linked ticket text is matched to the changed symbols and optional Jira/Linear tickets plus Sentry/Datadog/PostHog signals join the prompt | Beat-plan Wave H; ties an issue to the code it touches; off by default, fail-soft, no new service | 271 tests pass (`test_prodcontext`, `test_integrations` new) |
+| 25 | 2026-10-19 | **Wave J**: **local MCP server** (`mcp_server.py`): stdlib-only JSON-RPC 2.0 over stdio exposing six read-only tools (`review` dry-run by default, `findings`, `recall`, `context`, `stats`, `repos`); one asyncio loop per session so the aiosqlite pool never crosses loops; no new dependency, no network | Beat-plan Wave J; lets Claude Desktop/Cursor read the engine locally without a token or a hosted service | 282 tests pass (`test_mcp_server` new) |
+
+## Local MCP server (iteration 25)
+`python -m buglens.mcp_server` speaks JSON-RPC 2.0 on stdio (protocol `2024-11-05`) with no `mcp`
+package and no network. Six read-only tools: `review` (calls `review_snippet`, **dry-run by
+default** so it never posts), `findings`, `recall`, `context`, `stats`, `repos`. Errors use the
+standard codes (`-32700`/`-32600`/`-32601`/`-32602`/`-32603`); unknown methods and a bad `params`
+are rejected, not guessed. The whole session runs on one asyncio loop because the aiosqlite pool
+cannot be shared across loops. Wiring for a client is in `docs/operations.md`.
 
 ## External context (iteration 24)
 Ticket text now points at the code, and optional production signals can join the review.

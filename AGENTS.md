@@ -53,6 +53,7 @@ user says **"final"**. Never print or commit the token.
 | `github.py` | REST **and GraphQL**: PR files (paginated), file content, inline review, upsert comment, check runs (create/update/find with annotations), `closingIssuesReferences`, issue fetch, PR/commit history |
 | `store.py` | SQLite: run idempotency, findings, **file_cache**, **repo_index**/**file_prs** (code graph + file history), delivery dedupe, outcomes → suppression, **drops** (verifier rationale) and learned lens/dismissal stats |
 | `pipeline.py` | orchestration + `review_pr()` / `review_snippet()` |
+| `mcp_server.py` | local MCP server over stdio (JSON-RPC 2.0, stdlib only): `list_tools`/`call_tool`/`handle`/`serve`/`main`; six read-only tools, `review` dry-run by default |
 
 Wiring: `routers/webhook.py` → `pipeline.review_pr`; `routers/review.py` → `pipeline.review_snippet`.
 
@@ -89,7 +90,9 @@ Wiring: `routers/webhook.py` → `pipeline.review_pr`; `routers/review.py` → `
       symbol (`objects.py`, `<file>` fallback) and opt-in per-lens comment caps (`lens_caps`);
       iteration 24 (Wave H) = external context: ticket text mapped to changed symbols
       (`prodcontext.py`) plus optional self-hosted production signals (`integrations.py`,
-      Jira/Linear/Sentry/Datadog/PostHog, off by default, fail-soft).
+      Jira/Linear/Sentry/Datadog/PostHog, off by default, fail-soft); iteration 25 (Wave J) =
+      local MCP server (`mcp_server.py`, stdlib-only JSON-RPC over stdio, six read-only tools,
+      `review` dry-run by default). Wave I (runtime proof) was skipped on user instruction.
       **Full plan:
       `../temp/intel/buglens-v2-beat-plan-2026-10.md` (Waves A–J).** Inline reply chat shipped;
       multi-model consensus (second model) still open)*
@@ -190,6 +193,20 @@ identity. `POST /api/v1/feedback` and `/engine/stats?repo=` expect `owner/repo`.
 - **Both blocks are bounded and opt-in.** The pipeline appends the ticket-symbol block and the
   signals block to the prompt context only when they are non-empty, and names the contributing
   providers in the footer: `external context: <providers>` (iteration-16 rule).
+
+## MCP server (iteration 25, do not regress)
+- **`mcp_server.py` is stdlib-only.** JSON-RPC 2.0 over stdio, hand-rolled. Never add the `mcp`
+  package, a third-party dependency, or a network listener; it must stay `python -m
+  buglens.mcp_server` with nothing but the engine store behind it.
+- **`review` is dry-run by default.** The MCP `review` tool runs `pipeline.review_snippet`; it must
+  never post unless a caller explicitly opts out of dry-run. No tool writes to GitHub.
+- **One event loop per session.** `serve` runs the whole stdio session on a single asyncio loop
+  because the aiosqlite pool must not cross loops (iteration-14 rule). Never `asyncio.run` per
+  message.
+- **Protocol errors are answered, not guessed.** Unknown method → `-32601`, bad `params` →
+  `-32602`, unparseable line → `-32700`, internal failure → `-32603`; a notification (no `id`)
+  returns nothing. Never silently drop a request.
+- Docs for client wiring live in `docs/operations.md` (`## MCP server`); keep them in step.
 
 ## Code objects and per-lens caps (iteration 23, do not regress)
 - **`objects.py` is pure and deterministic.** `build_units` reuses `symbols.changed_defs` (it does
