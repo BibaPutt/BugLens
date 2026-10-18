@@ -60,7 +60,8 @@ Point the extension at your own backend with the `buglens.apiUrl` setting.
 - **Learns.** 👍/👎 reactions suppress repeated noise and promote patterns into future
   prompts. On merge it checks whether each finding was actually fixed.
 - **Codebase-aware.** A persistent local index of the repo brings dependencies, importers,
-  tests and earlier reviews into context.
+  tests and earlier reviews into context, and ripple analysis names the callers of every
+  function that changed.
 
 Full detail: **[docs/engine.md](docs/engine.md)**.
 
@@ -73,7 +74,7 @@ Repo → **Settings → Webhooks → Add webhook**:
 | Payload URL | `https://your-host/api/v1/webhook` |
 | Content type | `application/json` |
 | Secret | the same string as `GITHUB_WEBHOOK_SECRET` |
-| Events | **Pull requests** only |
+| Events | **Pull requests**, **Issue comments**, **Pull request review comments**, **Reactions** |
 
 Host it yourself with SQLite: no Redis, no queue, no vector DB required. See
 [docs/configuration.md](docs/configuration.md).

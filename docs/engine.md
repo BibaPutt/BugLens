@@ -140,6 +140,23 @@ It gives each review:
 - their tests,
 - related files ranked by personalized PageRank seeded on the change.
 
+## Symbol graph and ripple analysis
+
+The code graph says which files relate. The symbol graph says which *symbols* changed and who
+calls them. When a PR edits a definition, the engine lists the in-repo callers of that name and
+hands the list to the lenses, so a reviewer reasoning about a function knows it has call sites
+elsewhere.
+
+Ripple analysis is deterministic and needs no model. It fires one finding in the case that is a
+genuine cross-file inconsistency rather than a hint: a changed definition that now takes a
+**required** argument (no default) while callers still exist. That candidate still has to pass
+the normal verify gate, so it posts only when it holds up.
+
+To see callers, the engine fetches up to six related file bodies (the files PageRank ranked
+highest) once per review and indexes their references; the fetch is skipped when the repo is not
+reachable over the API. The footer reports `ripple: N changed symbol(s) with callers` when the
+analysis had something to chew on. Nothing here blocks a PR or runs a new service.
+
 ## Recall: not repeating itself
 
 For every changed file the engine looks up findings it posted before, and their outcomes:

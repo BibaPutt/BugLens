@@ -22,7 +22,7 @@ import uuid
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 
-from . import adapters, github, indexer, llm, prompts, recall, secretscan, store, tickets, verify, walkthrough
+from . import adapters, github, indexer, llm, prompts, recall, secretscan, store, symbols, tickets, verify, walkthrough
 from . import lenses as L
 from .context import build_context, extract_symbols, language_of
 from .diff import FileDiff, DiffLine, ADD, choose_paths, parse_patch
@@ -40,6 +40,7 @@ MARKER = "<!-- buglens:v2 -->"
 MARKER_CAP = "<!-- buglens:round-cap -->"
 MAX_LENSES_PER_FILE = 3
 CONCURRENCY = 4
+RIPPLE_FETCH = 6          # related files whose bodies we fetch to build the symbol graph
 
 
 @dataclass
@@ -254,7 +255,8 @@ def _engine_stats(usage: dict, wall: float) -> str:
 
 def _engine_notes(rules: Rules, verified, all_findings: list[dict],
                   ticket: bool, graph_files: int, recall: bool, calls: int, failures: int,
-                  converging: bool, linters_run: list[str] | None = None) -> list[str]:
+                  converging: bool, linters_run: list[str] | None = None,
+                  ripple: int = 0) -> list[str]:
     """Plain-language disclosure of every optional layer that changed review depth.
 
     No feature may alter review depth silently, the non-consensual-defaults lesson."""
@@ -274,6 +276,8 @@ def _engine_notes(rules: Rules, verified, all_findings: list[dict],
         notes.append("linked-ticket check")
     if graph_files:
         notes.append(f"code graph: {graph_files} file(s)")
+    if ripple:
+        notes.append(f"ripple: {ripple} changed symbol(s) with callers")
     if recall:
         notes.append("prior-review recall")
     if calls and failures and failures < calls:
@@ -910,15 +914,34 @@ async def _review_pr(owner: str, repo: str, pr_number: int, *, base_sha: str | N
     # Persistent code graph: index the files we already have, then pull callers/tests.
     related_block = ""
     graph_files = 0
+    ripple_items: list[dict] = []
     if db and file_texts:
         try:
+            changed_paths = [fd.path for fd in picked]
             await indexer.index_files(slug, file_texts, db)
             index, graph = await _load_graph(slug, db)
             graph_files = len(index)
-            related = indexer.related_files(index, graph, [fd.path for fd in picked])
+            related = indexer.related_files(index, graph, changed_paths)
+            # Fetch a bounded slice of the related files themselves so their *references*
+            # enter the index. Without their bodies the symbol graph only sees the changed
+            # files and ripple analysis has nothing to ripple to.
+            if github.configured():
+                todo = [p for p in related if p not in file_texts][:RIPPLE_FETCH]
+                if todo:
+                    fetched = await _fetch_texts(owner, repo, todo, head_sha)
+                    if fetched:
+                        file_texts.update({p: t[:4000] for p, t in fetched.items()})
+                        await indexer.index_files(slug, file_texts, db)
+                        index, graph = await _load_graph(slug, db)
+                        graph_files = len(index)
             related_block = indexer.context_pack(index, related)
+            ripple_items = symbols.ripple(index, symbols.changed_defs(picked), changed_paths)
+            ripple_text = symbols.ripple_block(ripple_items)
+            if ripple_text:
+                related_block = (related_block + "\n\n" + ripple_text)[:8000]
         except Exception:
             related_block = ""
+            ripple_items = []
 
     # Prior-review / prior-PR recall: never repeat ourselves, note what stayed open.
     recall_text = ""
@@ -984,6 +1007,13 @@ async def _review_pr(owner: str, repo: str, pr_number: int, *, base_sha: str | N
     if lint_findings:
         all_findings.extend(lint_findings)
         lenses_run.add("lint")
+
+    # Cross-file inconsistency: a changed signature that now demands a new argument while
+    # in-repo callers still exist. Still a candidate, the verify gate has to keep it.
+    ripple_findings = symbols.ripple_findings(ripple_items)
+    if ripple_findings:
+        all_findings.extend(ripple_findings)
+        lenses_run.add("merge")
 
     # PR-level merge gate
     if picked:
@@ -1061,7 +1091,7 @@ async def _review_pr(owner: str, repo: str, pr_number: int, *, base_sha: str | N
         converging=converging,
         engine_notes=_engine_notes(rules, verified, all_findings, bool(ticket_block),
                                    graph_files, bool(recall_text), calls, failures, converging,
-                                   linters_run=linters_run),
+                                   linters_run=linters_run, ripple=len(ripple_items)),
         change_stack=walkthrough.build_change_stack(picked, kept),
         pre_merge=_pre_merge_checks(picked, ticket_summary, linters_run,
                                     "secrets" in lenses_run, round_no, rules),

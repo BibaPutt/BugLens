@@ -41,6 +41,7 @@ user says **"final"**. Never print or commit the token.
 | `adapters.py` | deterministic linters/SAST (ruff, bandit, eslint, node-syntax, shellcheck, hadolint, rubocop, yamllint, php-syntax); ground-truth findings, capped to added lines, bypass model gate, opt-in via `linters:` |
 | `tickets.py` | linked-issue parse (keyword set) + acceptance-criteria extraction + ticket prompt block |
 | `indexer.py` | persistent code graph: stdlib-`ast`/regex parse, incremental `repo_index`, import graph, tests, PageRank retrieval, bounded context pack |
+| `symbols.py` | symbol/contract graph: `changed_defs` (added signature lines), `ripple` (in-repo callers), `ripple_block` (lens context), `ripple_findings` (cross-file inconsistency candidate, gated by verify) |
 | `recall.py` | prior-review/prior-PR recall: past findings by path (+ outcomes), dismissals, `file_prs` history, bounded recall block |
 | `walkthrough.py` | deterministic Change-Stack grouping: classify changed files into ordered chapters (schema→models→logic→api→ui→config→tests→docs), per-chapter notes; no model |
 | `chat.py` | threaded `@buglens` commands: `parse_command` routing, `answer` (deterministic Change-Stack for `explain`, one bounded `complete_text` for `why`/`ask`), `handoff_prompts` Fix-All, `handle_command` posts an in-thread reply |
@@ -73,7 +74,8 @@ Wiring: `routers/webhook.py` → `pipeline.review_pr`; `routers/review.py` → `
       cost+activation disclosure footer and re-review round cap/convergence; iteration 17 (Wave A)
       = deterministic adapters + anchor re-anchor gate + check-run lite; iteration 18 (Wave B) =
       Change-Stack walkthrough + pre-merge checks + opt-in `request_changes`; iteration 19 (Wave C) =
-      threaded `@buglens` Q&A + `/explain /why /fix` commands + Fix-All handoff. **Full plan:
+      threaded `@buglens` Q&A + `/explain /why /fix` commands + Fix-All handoff; iteration 20 (Wave D) =
+      symbol/contract graph + ripple analysis of changed signatures. **Full plan:
       `../temp/intel/buglens-v2-beat-plan-2026-10.md` (Waves A–J).** Inline reply chat shipped;
       multi-model consensus (second model) still open)*
 
@@ -155,6 +157,24 @@ identity. `POST /api/v1/feedback` and `/engine/stats?repo=` expect `owner/repo`.
   whole hunk + the `pr_round_files` ledger (`first_round<round_no`); keep it deterministic.
 - The round-cap note uses its own marker (`pipeline.MARKER_CAP`); the convergence note reuses
   `MARKER` (it *is* the current review).
+
+## Symbol graph + ripple (iteration 20, do not regress)
+- **`symbols.py` is pure and deterministic.** `changed_defs` reads only added lines;
+  `ripple`/`ripple_block`/`ripple_findings` read only the loaded index. No model, no I/O, keep
+  it that way so the same inputs give the same output.
+- **Ripple callers come from indexed file bodies, not from the diff.** The pipeline fetches up to
+  `pipeline.RIPPLE_FETCH` (6) related file bodies, indexes them, then reloads the graph
+  (`_load_graph` re-keys on `index_version`, so the reload is correct). If GitHub is not
+  configured the fetch is skipped and ripple simply sees the changed files. Never make the fetch
+  required and never raise on it, the whole block is wrapped and falls back to an empty ripple.
+- **Only one ripple finding exists, and the gate still decides.** A changed definition that now
+  takes a **required** (no-default) argument while callers exist. It ships
+  `deterministic=False`, `confidence=0.5`, lens `merge`, and a fingerprint; it is dropped unless
+  it passes the normal verify gate. Never mark a ripple finding deterministic (that would skip
+  the gate).
+- **Name it in the footer.** `_engine_notes(..., ripple=len(ripple_items))` prints
+  `ripple: N changed symbol(s) with callers`. A depth change that is not named is a bug
+  (iteration-16 rule).
 
 ## Chat and commands (iteration 19, do not regress)
 - **A known verb wins, else "review".** `chat.parse_command`: `@buglens review|re-review`,
