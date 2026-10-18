@@ -42,11 +42,12 @@ user says **"final"**. Never print or commit the token.
 | `tickets.py` | linked-issue parse (keyword set) + acceptance-criteria extraction + ticket prompt block |
 | `indexer.py` | persistent code graph: stdlib-`ast`/regex parse, incremental `repo_index`, import graph, tests, PageRank retrieval, bounded context pack |
 | `symbols.py` | symbol/contract graph: `changed_defs` (added signature lines), `ripple` (in-repo callers), `ripple_block` (lens context), `ripple_findings` (cross-file inconsistency candidate, gated by verify) |
+| `learn.py` | pure, deterministic learning+: `lens_ranking` (demote down-voted lenses), `order_lenses`, `learn_block` (bounded feedback advisory for prompts), `candidate_rules` (human-approved `.buglens.yml` snippets, never auto-applied) |
 | `recall.py` | prior-review/prior-PR recall: past findings by path (+ outcomes), dismissals, `file_prs` history, bounded recall block |
 | `walkthrough.py` | deterministic Change-Stack grouping: classify changed files into ordered chapters (schema→models→logic→api→ui→config→tests→docs), per-chapter notes; no model |
 | `chat.py` | threaded `@buglens` commands: `parse_command` routing, `answer` (deterministic Change-Stack for `explain`, one bounded `complete_text` for `why`/`ask`), `handoff_prompts` Fix-All, `handle_command` posts an in-thread reply |
 | `github.py` | REST **and GraphQL**: PR files (paginated), file content, inline review, upsert comment, check runs, `closingIssuesReferences`, issue fetch, PR/commit history |
-| `store.py` | SQLite: run idempotency, findings, **file_cache**, **repo_index**/**file_prs** (code graph + file history), delivery dedupe, outcomes → suppression |
+| `store.py` | SQLite: run idempotency, findings, **file_cache**, **repo_index**/**file_prs** (code graph + file history), delivery dedupe, outcomes → suppression, **drops** (verifier rationale) and learned lens/dismissal stats |
 | `pipeline.py` | orchestration + `review_pr()` / `review_snippet()` |
 
 Wiring: `routers/webhook.py` → `pipeline.review_pr`; `routers/review.py` → `pipeline.review_snippet`.
@@ -75,7 +76,9 @@ Wiring: `routers/webhook.py` → `pipeline.review_pr`; `routers/review.py` → `
       = deterministic adapters + anchor re-anchor gate + check-run lite; iteration 18 (Wave B) =
       Change-Stack walkthrough + pre-merge checks + opt-in `request_changes`; iteration 19 (Wave C) =
       threaded `@buglens` Q&A + `/explain /why /fix` commands + Fix-All handoff; iteration 20 (Wave D) =
-      symbol/contract graph + ripple analysis of changed signatures. **Full plan:
+      symbol/contract graph + ripple analysis of changed signatures; iteration 21 (Wave E) =
+      learning+: feedback advisories in the prompt, lens demotion by feedback, human-approved
+      `.buglens.yml` candidates (`/engine/learn`), verifier drop rationales persisted. **Full plan:
       `../temp/intel/buglens-v2-beat-plan-2026-10.md` (Waves A–J).** Inline reply chat shipped;
       multi-model consensus (second model) still open)*
 
@@ -157,6 +160,26 @@ identity. `POST /api/v1/feedback` and `/engine/stats?repo=` expect `owner/repo`.
   whole hunk + the `pr_round_files` ledger (`first_round<round_no`); keep it deterministic.
 - The round-cap note uses its own marker (`pipeline.MARKER_CAP`); the convergence note reuses
   `MARKER` (it *is* the current review).
+
+## Learning+ (iteration 21, do not regress)
+- **`learn.py` is pure.** Dicts in, strings/dicts out. No store, model, network, or I/O. Keep it
+  that way so the same feedback always renders the same advisory and the same suggestions.
+- **Suggestions are never auto-applied.** `candidate_rules` returns `.buglens.yml` snippets a human
+  copies in. The real ignore key is **`ignore_paths`** (not `ignore`; `_to_rules` matches attribute
+  names, so a wrong key is silently dropped). Demotion suggestions annotate `focus:` as a comment.
+- **Demotion never removes a lens.** `lens_ranking` needs `raised >= MIN_SAMPLES (5)` and a
+  down-rate `>= DOWN_RATE (0.5)`; `order_lenses` only moves demoted lenses to the end of a file's
+  lens list. Named in the footer: `adaptive: N lens(es) demoted by feedback`. The advisory scope
+  count is named too: `learned from feedback: N dismissal scope(s)`.
+- **Feedback is read, not invented.** `store.lens_outcome_stats` joins `findings`→`runs`→`outcomes`
+  on `(fingerprint, repo)`; `dismissal_scopes` needs `downs >= 2` and `downs - ups >= threshold`.
+  A lens with no feedback still appears with zeros; a NULL lens groups under `unknown`.
+- **Verifier rationale is persisted.** `pipeline` calls `store.save_drops(run_id, slug,
+  verified.dropped, db)` best-effort (wrapped, never costs the review); the reason bucket is
+  `drop_reason.split(":", 1)[0]` (`machine` / `model` / `suppressed by prior feedback` /
+  `unknown`). Read back via `store.drop_stats` and `GET /api/v1/engine/stats` (`drops`).
+- **`GET /api/v1/engine/learn?repo=` requires the admin key.** It is read-only: `{repo, lens_stats,
+  scopes, candidates}`. Never make it mutate config.
 
 ## Symbol graph + ripple (iteration 20, do not regress)
 - **`symbols.py` is pure and deterministic.** `changed_defs` reads only added lines;

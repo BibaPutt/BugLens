@@ -22,7 +22,7 @@ import uuid
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 
-from . import adapters, github, indexer, llm, prompts, recall, secretscan, store, symbols, tickets, verify, walkthrough
+from . import adapters, github, indexer, learn, llm, prompts, recall, secretscan, store, symbols, tickets, verify, walkthrough
 from . import lenses as L
 from .context import build_context, extract_symbols, language_of
 from .diff import FileDiff, DiffLine, ADD, choose_paths, parse_patch
@@ -256,7 +256,8 @@ def _engine_stats(usage: dict, wall: float) -> str:
 def _engine_notes(rules: Rules, verified, all_findings: list[dict],
                   ticket: bool, graph_files: int, recall: bool, calls: int, failures: int,
                   converging: bool, linters_run: list[str] | None = None,
-                  ripple: int = 0) -> list[str]:
+                  ripple: int = 0, learned_scopes: int = 0,
+                  demoted_lenses: int = 0) -> list[str]:
     """Plain-language disclosure of every optional layer that changed review depth.
 
     No feature may alter review depth silently, the non-consensual-defaults lesson."""
@@ -278,6 +279,10 @@ def _engine_notes(rules: Rules, verified, all_findings: list[dict],
         notes.append(f"code graph: {graph_files} file(s)")
     if ripple:
         notes.append(f"ripple: {ripple} changed symbol(s) with callers")
+    if learned_scopes:
+        notes.append(f"learned from feedback: {learned_scopes} dismissal scope(s)")
+    if demoted_lenses:
+        notes.append(f"adaptive: {demoted_lenses} lens(es) demoted by feedback")
     if recall:
         notes.append("prior-review recall")
     if calls and failures and failures < calls:
@@ -967,6 +972,20 @@ async def _review_pr(owner: str, repo: str, pr_number: int, *, base_sha: str | N
 
     prior_good = await store.confirmed_good(slug, 8, db) if db else []
 
+    # Learning+: turn accumulated reactions into a bounded advisory and a demoted-lens set.
+    learn_scopes: list[dict] = []
+    demoted: set[str] = set()
+    if db:
+        try:
+            lens_stats = await store.lens_outcome_stats(slug, db)
+            learn_scopes = await store.dismissal_scopes(slug, db)
+            learn_text = learn.learn_block(learn_scopes, lens_stats)
+            if learn_text:
+                context_block = (context_block + "\n\n" + learn_text)[:12000]
+            demoted = set(learn.lens_ranking(lens_stats)[0])
+        except Exception:
+            learn_scopes, demoted = [], set()
+
     sem = asyncio.Semaphore(CONCURRENCY)
     all_findings: list[dict] = []
     positives: list[str] = []
@@ -975,6 +994,8 @@ async def _review_pr(owner: str, repo: str, pr_number: int, *, base_sha: str | N
 
     for fd in picked:
         lenses = L.select_lenses(fd.path, fd.language, rules.focus, pool=lens_pool)
+        if demoted:
+            lenses = learn.order_lenses(lenses, demoted)
         if not lenses:
             continue
         cache_key = _file_cache_key(
@@ -1041,6 +1062,13 @@ async def _review_pr(owner: str, repo: str, pr_number: int, *, base_sha: str | N
     all_findings = _dedupe(all_findings)
     verified = await verify.verify_all(all_findings, files_by_path, rules)
 
+    # Verifier rationale persistence: explain why candidates were dropped, not just how many.
+    if db and verified.dropped:
+        try:
+            await store.save_drops(run_id, slug, verified.dropped, db)
+        except Exception:
+            pass
+
     # cross-push dedupe: never re-post a finding already posted on this repo
     posted_before = await store.posted_fingerprints(slug, db) if db else set()
     fresh = [f for f in verified.kept if f["fingerprint"] not in posted_before]
@@ -1091,7 +1119,9 @@ async def _review_pr(owner: str, repo: str, pr_number: int, *, base_sha: str | N
         converging=converging,
         engine_notes=_engine_notes(rules, verified, all_findings, bool(ticket_block),
                                    graph_files, bool(recall_text), calls, failures, converging,
-                                   linters_run=linters_run, ripple=len(ripple_items)),
+                                   linters_run=linters_run, ripple=len(ripple_items),
+                                   learned_scopes=len(learn_scopes),
+                                   demoted_lenses=len(demoted)),
         change_stack=walkthrough.build_change_stack(picked, kept),
         pre_merge=_pre_merge_checks(picked, ticket_summary, linters_run,
                                     "secrets" in lenses_run, round_no, rules),

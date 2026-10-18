@@ -112,6 +112,26 @@ read this, do one iteration from "Backlog", append to "Iteration log", commit.**
 | 18 | 2026-10-19 | **Wave B (W4) of the beat-plan**: **Change-Stack walkthrough** (`walkthrough.py`, deterministic path heuristics, no model) grouping changed files into ordered chapters (schema → models → logic → api → ui → config → tests → docs) with a note per chapter (file count, new count, top findings); **pre-merge checks** block (`_pre_merge_checks`, `pre_merge_checks` rule, default true, informational only); **opt-in `request_changes`** (default false; `_post` posts `REQUEST_CHANGES` only on a `blocking` verdict, `github.post_review` clamps the event) | Beat-plan Wave B; CodeRabbit/Graphite change-by-change walkthrough; backlog item 7 | 152 tests pass (`test_walkthrough` new; `test_pipeline` stack + pre-merge + request-changes opt-in; `test_rules` knobs) |
 | 19 | 2026-10-19 | **Wave C (W1)**: threaded **`@buglens` Q&A + commands** (`chat.py`): `review`/`re-review` hand back to the pipeline, `explain` (deterministic Change-Stack narrative), `why` (grounded in finding evidence), `fix` (Fix-All copy-ready prompt for Claude Code/Cursor/Codex), free-form `ask`; routed from `issue_comment` and `pull_request_review_comment`; honest fallback when the model is down | Beat-plan Wave C; all three competitors have PR chat; backlog item 8 | 163 tests pass (`test_chat` new; `test_webhook` chat routing; `test_pipeline` unchanged) |
 | 20 | 2026-10-19 | **Wave D (W2)**: **symbol/contract graph + ripple analysis** (`symbols.py`): `changed_defs` reads added signature lines (py/js/go/method), `ripple` lists in-repo callers, `ripple_block` feeds lenses, `ripple_findings` flags a changed signature that now demands a required argument while callers exist; pipeline fetches up to 6 related bodies to index their refs | Beat-plan Wave D; Greptile/Macroscope sell "knows what else breaks" | 169 tests pass (`test_symbols` new) |
+| 21 | 2026-10-19 | **Wave E (W5)**: **learning+** (`learn.py` + `store` additions): feedback advisories injected into the prompt, per-lens demotion by reaction history, human-approved `.buglens.yml` candidates via `GET /api/v1/engine/learn`, verifier drop rationales persisted (`drops`, `GET /engine/stats`) | Beat-plan Wave E; closes the "learns what you don't care about" gap with local data only | 195 tests pass (`test_learn`, `test_store_learn`, `test_engine_learn` new) |
+
+## Learning from feedback (iteration 21)
+The reaction loop already suppressed repeated fingerprints. This iteration lifts it from a single
+fingerprint to the repo's lenses and path scopes, using only data already stored.
+
+- `learn.lens_ranking` demotes a lens once it has 5 or more raised findings and a down-rate of 0.5
+  or higher; `learn.order_lenses` only moves demoted lenses to the end of a file's lens list, it
+  never removes one. The footer names it: `adaptive: N lens(es) demoted by feedback`.
+- `learn.learn_block` renders a bounded advisory (`## Feedback on this repo ...`) listing the path
+  scopes where the team keeps dismissing a lens; the pipeline injects it into the prompt context and
+  names it in the footer (`learned from feedback: N dismissal scope(s)`).
+- `learn.candidate_rules` returns ready-to-paste `.buglens.yml` snippets (an `ignore_paths:` glob, or
+  dropping a down-voted lens from `focus:`). The engine never applies them; a human copies what they
+  agree with. Surfaced read-only, admin-gated, via `GET /api/v1/engine/learn?repo=`.
+- `store.save_drops` persists every candidate the verify gate rejected with a reason bucket
+  (`machine`, `model`, `suppressed by prior feedback`, `unknown`); `store.drop_stats` and
+  `GET /api/v1/engine/stats?repo=` expose the histogram, so the drop rate is explained, not guessed.
+- All of it is local (SQLite), deterministic, and additive: no new service, no Docker, no WSL, and
+  nothing here blocks a PR.
 
 ## Symbol graph + ripple analysis (iteration 20)
 The code graph answered "which files relate"; this answers "which symbol changed, and who calls

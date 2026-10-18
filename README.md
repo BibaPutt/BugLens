@@ -41,6 +41,7 @@ Or: `Ctrl+Shift+X` → search **BugLens** → Install. Then open a file and pres
 | Re-review a PR on demand | comment `@buglens review` |
 | Ask about the PR | comment `@buglens why`, `@buglens explain`, or any question |
 | Get a fix | comment `@buglens fix` for a copy-ready Fix-All prompt |
+| See what BugLens learned for a repo | `GET /api/v1/engine/learn?repo=owner/name` |
 
 Point the extension at your own backend with the `buglens.apiUrl` setting.
 
@@ -57,8 +58,9 @@ Point the extension at your own backend with the `buglens.apiUrl` setting.
   (schema, models, logic, api, ui, config, tests, docs) with a deterministic pre-merge
   checklist, so you review the change bottom-up.
 - **One review per PR.** Never a comment storm; pushes don't duplicate comments.
-- **Learns.** 👍/👎 reactions suppress repeated noise and promote patterns into future
-  prompts. On merge it checks whether each finding was actually fixed.
+- **Learns.** 👍/👎 reactions suppress repeated noise, inject learned advisories into future
+  prompts, demote a lens this repo keeps rejecting, and propose `.buglens.yml` rules a human
+  applies by hand. On merge it checks whether each finding was actually fixed.
 - **Codebase-aware.** A persistent local index of the repo brings dependencies, importers,
   tests and earlier reviews into context, and ripple analysis names the callers of every
   function that changed.

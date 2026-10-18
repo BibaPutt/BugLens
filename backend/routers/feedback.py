@@ -10,7 +10,7 @@ import logging
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 
-from buglens import lenses, store
+from buglens import learn, lenses, store
 from buglens.rules import describe
 from buglens.rules import load_rules
 from core.budget import enforce_daily_budget
@@ -53,6 +53,19 @@ async def engine_repos():
     return {"repos": await store.known_repos()}
 
 
+@router.get("/engine/learn", dependencies=[Depends(require_admin_key)], tags=["engine"])
+async def engine_learn(repo: str):
+    """Learned feedback for a repo: per-lens stats, dismissal scopes, candidate rules.
+
+    Read-only. The candidate snippets are suggestions a human copies into `.buglens.yml`;
+    the engine never applies them.
+    """
+    stats = await store.lens_outcome_stats(repo)
+    scopes = await store.dismissal_scopes(repo)
+    return {"repo": repo, "lens_stats": stats, "scopes": scopes,
+            "candidates": learn.candidate_rules(scopes, stats)}
+
+
 @router.get("/engine/stats", dependencies=[Depends(require_admin_key)], tags=["engine"])
 async def engine_stats(repo: str | None = None):
     stats = await store.stats()
@@ -60,4 +73,5 @@ async def engine_stats(repo: str | None = None):
         raise HTTPException(503, "engine store unavailable")
     if repo:
         stats["resolution"] = await store.resolution_stats(repo)
+        stats["drops"] = await store.drop_stats(repo)
     return stats

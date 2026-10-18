@@ -147,6 +147,16 @@ CREATE TABLE IF NOT EXISTS pr_round_files (
     content_sha TEXT NOT NULL, first_round INTEGER NOT NULL, created_at TEXT NOT NULL,
     PRIMARY KEY (repo, pr, path, content_sha)
 );
+CREATE TABLE IF NOT EXISTS drops (
+    id TEXT PRIMARY KEY,
+    run_id TEXT NOT NULL,
+    repo TEXT NOT NULL,
+    lens TEXT,
+    reason TEXT,
+    title TEXT,
+    created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_drops_repo ON drops(repo);
 """
 
 
@@ -649,3 +659,116 @@ async def stats(path: str | None = None) -> dict:
         findings = (await (await db.execute("SELECT COUNT(*) FROM findings")).fetchone())[0]
         outcomes = (await (await db.execute("SELECT COUNT(*) FROM outcomes")).fetchone())[0]
     return {"runs": runs, "findings": findings, "outcomes": outcomes}
+
+
+async def lens_outcome_stats(repo: str, path: str | None = None) -> dict[str, dict]:
+    """Per-lens raised/feedback counts for a repo.
+
+    Returns {lens_name: {"raised": int, "up": int, "down": int,
+                          "fixed": int, "unfixed": int}}.
+    Raised = rows in `findings` for that lens belonging to this repo's runs
+    (join findings -> runs on run_id, filter runs.repo = ?).
+    up/down/fixed/unfixed come from LEFT JOIN outcomes on
+    (o.fingerprint = f.fingerprint AND o.repo = ?), counting verdicts
+    'up', 'down', 'resolved', 'unresolved'. A lens with no feedback still appears
+    with 0s. Rows with a NULL/empty lens are grouped under "unknown".
+    """
+    path = path or db_path()
+    async with _open(path) as db:
+        rows = await (await db.execute(
+            "SELECT COALESCE(NULLIF(f.lens, ''), 'unknown') AS lens,"
+            " COUNT(DISTINCT f.id) AS raised,"
+            " SUM(CASE WHEN o.verdict='up' THEN 1 ELSE 0 END),"
+            " SUM(CASE WHEN o.verdict='down' THEN 1 ELSE 0 END),"
+            " SUM(CASE WHEN o.verdict='resolved' THEN 1 ELSE 0 END),"
+            " SUM(CASE WHEN o.verdict='unresolved' THEN 1 ELSE 0 END)"
+            " FROM findings f JOIN runs r ON f.run_id=r.id"
+            " LEFT JOIN outcomes o ON o.fingerprint=f.fingerprint AND o.repo=?"
+            " WHERE r.repo=?"
+            " GROUP BY COALESCE(NULLIF(f.lens, ''), 'unknown')",
+            (repo, repo),
+        )).fetchall()
+    return {
+        r[0]: {"raised": int(r[1] or 0), "up": int(r[2] or 0), "down": int(r[3] or 0),
+               "fixed": int(r[4] or 0), "unfixed": int(r[5] or 0)}
+        for r in rows
+    }
+
+
+async def dismissal_scopes(repo: str, path: str | None = None,
+                           threshold: int = 2) -> list[dict]:
+    """Scopes where the team repeatedly dismissed findings.
+
+    Group findings (for this repo's runs) by (scope, lens), where scope is derived from the
+    finding path: if os.path.dirname(path) is non-empty -> "<dirname>/*" else "*".
+    For each group compute downs = sum of 'down' outcomes and ups = sum of 'up' outcomes
+    over the group's findings (LEFT JOIN outcomes as above).
+    Keep groups where (downs - ups) >= threshold and downs >= 2.
+    Return a list of dicts, sorted by (downs - ups) desc then scope asc:
+      {"scope": str, "lens": str, "downs": int, "ups": int, "sample": str}
+    where sample is one representative finding title from the group (any non-empty title).
+    Empty list when nothing qualifies.
+    """
+    path = path or db_path()
+    async with _open(path) as db:
+        rows = await (await db.execute(
+            "SELECT f.path, COALESCE(NULLIF(f.lens, ''), 'unknown'), f.title, o.verdict"
+            " FROM findings f JOIN runs r ON f.run_id=r.id"
+            " LEFT JOIN outcomes o ON o.fingerprint=f.fingerprint AND o.repo=?"
+            " WHERE r.repo=?",
+            (repo, repo),
+        )).fetchall()
+    groups: dict[tuple[str, str], dict] = {}
+    for f_path, lens, title, verdict in rows:
+        parent = os.path.dirname(f_path) if f_path else ""
+        scope = f"{parent}/*" if parent else "*"
+        g = groups.setdefault((scope, lens), {"scope": scope, "lens": lens,
+                                              "downs": 0, "ups": 0, "sample": ""})
+        if verdict == "down":
+            g["downs"] += 1
+        elif verdict == "up":
+            g["ups"] += 1
+        if not g["sample"] and title:
+            g["sample"] = title
+    out = [g for g in groups.values()
+           if (g["downs"] - g["ups"]) >= threshold and g["downs"] >= 2]
+    out.sort(key=lambda g: (-(g["downs"] - g["ups"]), g["scope"]))
+    return out
+
+
+async def save_drops(run_id: str, repo: str, dropped: list[dict],
+                     path: str | None = None) -> int:
+    """Persist verifier rationales so outcome metrics can explain why candidates vanish.
+
+    For each dropped finding, store: id (uuid4 hex), run_id, repo, lens (f.get("lens")),
+    reason = (f.get("drop_reason") or "unknown").split(":", 1)[0].strip(),
+    title (f.get("title")), created_at (_now()). Single connection, single commit.
+    Returns the number of rows written.
+    """
+    path = path or db_path()
+    if not dropped:
+        return 0
+    now = _now()
+    rows = [
+        (uuid.uuid4().hex, run_id, repo, f.get("lens"),
+         (f.get("drop_reason") or "unknown").split(":", 1)[0].strip(),
+         f.get("title"), now)
+        for f in dropped
+    ]
+    async with _open(path) as db:
+        await db.executemany(
+            "INSERT INTO drops (id, run_id, repo, lens, reason, title, created_at)"
+            " VALUES (?,?,?,?,?,?,?)", rows,
+        )
+        await db.commit()
+    return len(rows)
+
+
+async def drop_stats(repo: str, path: str | None = None) -> dict[str, int]:
+    """Reason bucket -> count of drops for a repo (e.g. {"machine": 3, "model": 5})."""
+    path = path or db_path()
+    async with _open(path) as db:
+        rows = await (await db.execute(
+            "SELECT reason, COUNT(*) FROM drops WHERE repo=? GROUP BY reason", (repo,)
+        )).fetchall()
+    return {r[0] or "unknown": int(r[1]) for r in rows}

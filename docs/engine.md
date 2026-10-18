@@ -169,6 +169,33 @@ For every changed file the engine looks up findings it posted before, and their 
 Open items are restated compactly; dismissed ones are suppressed; fixed ones are counted so
 the review does not re-litigate. Prior PRs that touched the same files add one line each.
 
+## Learning from feedback
+
+Reactions and IDE feedback do more than suppress one fingerprint. The engine aggregates them per
+lens and per path scope, and the result shapes the next review. All of it is local and
+deterministic: no model call builds any of it.
+
+- **Learned advisories.** The review prompt gets a bounded block headed
+  `Feedback on this repo (learned from reactions; do not repeat dismissed noise)`. It lists the
+  scopes where the team keeps dismissing a lens and names the most down-voted lenses. The block
+  is built from stored feedback, not from a model call.
+- **Adaptive lens ordering.** A lens with at least 5 raised findings and a down-rate of `0.5` or
+  higher is **demoted**: it moves to the end of the lens order for each file, never removed, so a
+  budget-limited review prefers lenses this repo has not been rejecting. When at least one lens is
+  demoted for a review, the footer says so: `adaptive: N lens(es) demoted by feedback`. Nothing
+  is turned off silently.
+- **Candidate rules, human-approved.** The engine proposes rule snippets: an `ignore_paths:` glob
+  for a scope with repeated dismissals (at least 3 net dismissals), or dropping a down-voted lens
+  from `focus:`. It never applies them. They are read back over the API (see
+  [api.md](api.md#engine-introspection)), and a human copies what they agree with into
+  `.buglens.yml`; both keys are documented in
+  [configuration.md](configuration.md#repo-rules).
+- **Verifier rationale.** Every candidate the verify gate drops is stored with a short reason
+  bucket: `machine`, `model`, `suppressed by prior feedback` or `unknown`, so the drop rate can be
+  explained rather than guessed. The counts are exposed as `drops` on the stats endpoint.
+
+It stays on SQLite: no Redis, no Docker, no WSL, and it never blocks a PR.
+
 ## Repo rules (`.buglens.yml`)
 
 Rules are read from the PR's **base branch**, so a PR cannot change how it is reviewed.

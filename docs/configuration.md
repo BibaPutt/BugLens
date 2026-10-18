@@ -108,6 +108,13 @@ a deterministic checklist to the walkthrough (tests moved, issue linked, secrets
 posts `REQUEST_CHANGES` **only** when the verdict is `blocking` (a blocker-severity finding);
 off, every review is `event=COMMENT`.
 
+Two keys are where a human applies a learned suggestion (see
+[engine.md](engine.md#learning-from-feedback)): `ignore_paths:` takes globs for a scope the team
+keeps dismissing, and `focus:` takes the lens allow-list, so dropping a down-voted lens means
+removing it from `focus:`. The engine only proposes these snippets; it never edits the file. A
+lens is proposed for demotion at 5 raised findings with a down-rate of `0.5`, and a dismissal
+scope becomes an `ignore_paths:` suggestion at 3 net dismissals.
+
 ### Deterministic linters
 
 Run real linters/SAST locally and fold their output in as **ground-truth findings** (they skip

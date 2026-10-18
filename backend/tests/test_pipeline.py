@@ -2,7 +2,7 @@ import re
 
 import pytest
 
-from buglens import github, llm, pipeline
+from buglens import github, llm, pipeline, store
 from buglens.github import PRInfo
 from buglens.llm import LLMResult
 from buglens.rules import load_rules
@@ -201,6 +201,63 @@ async def test_summary_includes_walkthrough_and_context(monkeypatch, db):
     assert "Review effort" in capture["body"]
     assert "Context used" in capture["body"] and "README.md" in capture["body"]
     assert res.review_effort >= 1 and res.context_sources
+
+
+async def _seed_feedback(db_path):
+    await store.init(db_path)
+    for i in range(5):
+        run = await store.claim_run("o/r", 100 + i, f"seedsha{i}", None, db_path)
+        await store.save_findings(run, [{
+            "fingerprint": f"seedfp{i}", "path": f"app/api/f{i}.py", "line": 1,
+            "severity": "major", "category": "bug", "lens": "correctness",
+            "title": f"seed{i}", "body": "b", "fix": "", "confidence": 0.7}], db_path)
+        await store.record_outcome("o/r", f"seedfp{i}", "down", path=db_path)
+
+
+async def test_learn_advisory_reaches_prompt_and_demotes_lens(monkeypatch, db):
+    await _seed_feedback(db)
+    prompts: list[str] = []
+
+    async def capturing(messages, **kwargs):
+        if len(messages) > 1:
+            prompts.append(messages[1]["content"])
+        return await _fake_llm(messages, **kwargs)
+
+    monkeypatch.setattr(llm, "complete_json", capturing)
+    _patch_github(monkeypatch, [{"filename": "a.py", "status": "modified", "patch": PATCH}])
+
+    res = await pipeline.review_pr("o", "r", 1, db=db)
+
+    assert any("Feedback on this repo" in p for p in prompts)
+    assert any("app/api/*" in p for p in prompts)
+    assert any(n.startswith("adaptive:") for n in res.engine_notes)
+    assert any(n.startswith("learned from feedback:") for n in res.engine_notes)
+
+
+async def test_verify_drops_are_persisted(monkeypatch, db):
+    async def dropping(messages, **kwargs):
+        system = messages[0]["content"]
+        if "verifying findings" in system:
+            return LLMResult(data={"verdicts": [{"verdict": "drop", "decidable": True,
+                                                 "reason": "false positive"}]})
+        if "PR-level summary" in system:
+            return LLMResult(data={"summary": "s", "score": 90, "verdict": "needs-attention",
+                                   "highlights": [], "positives": []})
+        matched = re.search(r"LENS:\s*([^\s|(]+)", messages[1]["content"])
+        if matched and matched.group(1) == "security":
+            return LLMResult(data={"findings": [{
+                "severity": "major", "category": "security", "line": 2, "title": "eval",
+                "body": "rce", "fix": "f", "evidence": "bad = eval(user_input)",
+                "confidence": 0.9,
+            }], "positives": []})
+        return LLMResult(data={"findings": [], "positives": []})
+
+    monkeypatch.setattr(llm, "complete_json", dropping)
+    _patch_github(monkeypatch, [{"filename": "a.py", "status": "modified", "patch": PATCH}])
+
+    await pipeline.review_pr("o", "r", 1, db=db)
+
+    assert await store.drop_stats("o/r", db) == {"model": 1}
 
 
 def test_review_effort_is_bounded():

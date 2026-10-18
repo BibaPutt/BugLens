@@ -9,7 +9,8 @@ Base path `/api/v1`. Interactive schema at `/docs` on any running instance.
 | `POST` | `/api/v1/feedback` | 👍/👎 on a finding fingerprint |
 | `GET` | `/api/v1/engine` | Active lenses + effective repo rules |
 | `GET` | `/api/v1/engine/repos` | Repos reviewed, with resolution rate |
-| `GET` | `/api/v1/engine/stats` | Runs / findings / outcomes (admin) |
+| `GET` | `/api/v1/engine/stats` | Runs / findings / outcomes / drops (admin) |
+| `GET` | `/api/v1/engine/learn` | Learned scopes and candidate rules for a repo (admin) |
 | `GET` | `/api/v1/history` | Review history |
 | `GET` | `/api/v1/stats` | Analytics and stats |
 | `GET` | `/health` | Liveness + dependency check |
@@ -95,11 +96,23 @@ curl "$HOST/api/v1/engine?repo=owner/name"
 # repos the engine has reviewed, with run counts and resolution rate
 curl "$HOST/api/v1/engine/repos"
 
-# totals (admin)
+# learned feedback for a repo: per-lens stats, dismissal scopes, candidate rules (admin)
+curl -H "X-Admin-Key: $ADMIN_API_KEY" "$HOST/api/v1/engine/learn?repo=owner/name"
+
+# totals (admin); now includes a "drops" object keyed by verifier reason bucket
 curl -H "X-Admin-Key: $ADMIN_API_KEY" "$HOST/api/v1/engine/stats?repo=owner/name"
 ```
 
 `/engine/stats` returns `503` when `ADMIN_API_KEY` is not configured. That is deliberate, so
 an unconfigured deployment never exposes counters.
+
+`/engine/learn` is read-only and requires the admin key. It returns `{"repo": str, "lens_stats":
+{...}, "scopes": [...], "candidates": [...]}`. `repo` is the `owner/name` slug; `lens_stats` maps
+each lens to its raised count and its up/down feedback; `scopes` lists the path scopes where the
+team repeatedly dismissed a lens; `candidates` lists proposed `.buglens.yml` snippets (an
+`ignore_paths:` glob or a `focus:` change). Suggestions are never applied automatically.
+
+`/engine/stats` now also returns `drops`, an object mapping each verifier reason bucket
+(`machine`, `model`, `suppressed by prior feedback`, `unknown`) to a count.
 
 Repo parameters always take the `owner/repo` form.
