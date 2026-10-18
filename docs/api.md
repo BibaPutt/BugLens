@@ -63,6 +63,18 @@ Deliveries are deduplicated by `X-GitHub-Delivery`, and a review is only started
 `(repo, pr, head_sha)`, so a redelivery or a retried POST cannot double-post. The endpoint
 returns `202` as soon as the review is queued; reviews run in the background.
 
+Events handled:
+
+| Event | Trigger | Effect |
+|---|---|---|
+| `pull_request` | `opened` / `synchronize` / `reopened` / `ready_for_review` | review the PR |
+| `pull_request` | `closed` + merged | measure how many findings were fixed |
+| `issue_comment` | `created` with an `@buglens` mention | `review` runs a review; anything else is answered in-thread | 
+| `pull_request_review_comment` | `created` with an `@buglens` mention | same as above, in the review thread |
+| `reaction` | `+1` / `-1` on a BugLens finding | record feedback (suppression / confirmed-good) |
+
+See **Chat and commands** in [engine.md](engine.md#chat-and-commands) for the verbs.
+
 ## POST /api/v1/feedback
 
 ```bash

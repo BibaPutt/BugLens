@@ -39,6 +39,8 @@ Or: `Ctrl+Shift+X` → search **BugLens** → Install. Then open a file and pres
 | Toolbar | magnifier icon in the editor title bar |
 | Right-click | **BugLens: Review This Code** |
 | Re-review a PR on demand | comment `@buglens review` |
+| Ask about the PR | comment `@buglens why`, `@buglens explain`, or any question |
+| Get a fix | comment `@buglens fix` for a copy-ready Fix-All prompt |
 
 Point the extension at your own backend with the `buglens.apiUrl` setting.
 

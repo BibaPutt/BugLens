@@ -15,7 +15,7 @@ import re
 
 from fastapi import APIRouter, BackgroundTasks, HTTPException, Request
 
-from buglens import github, pipeline, store
+from buglens import chat, github, pipeline, store
 from core.security import verify_github_signature
 
 logger = logging.getLogger("buglens")
@@ -106,8 +106,33 @@ async def github_webhook(request: Request, background_tasks: BackgroundTasks):
         if not target:
             raise HTTPException(400, "Malformed repository payload")
         owner, repo, number = target
-        background_tasks.add_task(process_pr, owner, repo, number, "", "", request.headers.get("X-GitHub-Delivery"), True)
-        return {"status": "processing", "pr": f"{owner}/{repo}#{number}", "trigger": "mention"}
+        command, _arg = chat.parse_command(comment.get("body") or "")
+        if command == "review":
+            background_tasks.add_task(process_pr, owner, repo, number, "", "", request.headers.get("X-GitHub-Delivery"), True)
+            return {"status": "processing", "pr": f"{owner}/{repo}#{number}", "trigger": "mention"}
+        # Anything else is a conversation: answer in the thread, do not re-review.
+        background_tasks.add_task(chat.handle_command, owner, repo, number, comment.get("body") or "")
+        return {"status": "chatting", "pr": f"{owner}/{repo}#{number}", "command": command}
+
+    # ── threaded Q&A on an inline review comment: "@buglens why" ──────────────
+    if event == "pull_request_review_comment":
+        if payload.get("action") != "created":
+            return {"status": "ignored", "reason": f"action:{payload.get('action')}"}
+        comment = payload.get("comment") or {}
+        if _is_bot(comment.get("user")):
+            return {"status": "ignored", "reason": "bot-comment"}
+        if not MENTION_RE.search(comment.get("body") or ""):
+            return {"status": "ignored", "reason": "no-mention"}
+        target = _owner_repo_number(payload)
+        if not target:
+            raise HTTPException(400, "Malformed repository payload")
+        owner, repo, number = target
+        command, _arg = chat.parse_command(comment.get("body") or "")
+        if command == "review":
+            background_tasks.add_task(process_pr, owner, repo, number, "", "", request.headers.get("X-GitHub-Delivery"), True)
+            return {"status": "processing", "pr": f"{owner}/{repo}#{number}", "trigger": "review-comment"}
+        background_tasks.add_task(chat.handle_command, owner, repo, number, comment.get("body") or "")
+        return {"status": "chatting", "pr": f"{owner}/{repo}#{number}", "command": command}
 
     # ── merged PR: measure how many of our findings were actually resolved ────
     if payload.get("action") == "closed":

@@ -47,8 +47,10 @@ read this, do one iteration from "Backlog", append to "Iteration log", commit.**
 7. ~~**`REQUEST_CHANGES` opt-in** via `.buglens.yml` for teams that want a hard gate
    (still never the default).~~ **Shipped (iteration 18):** `request_changes: true` posts
    `REQUEST_CHANGES` only on a `blocking` verdict; the default stays `COMMENT` forever.
-8. **Inline reply chat**: reply to a thread on a BugLens comment (like the Gitea bot's
-   conversational mode) using the file context we already fetched.
+8. ~~**Inline reply chat**: reply to a thread on a BugLens comment (like the Gitea bot's
+   conversational mode) using the file context we already fetched.~~ **Shipped (iteration 19):**
+   `@buglens why` / `explain` / `fix` and free-form questions answer in-thread using the diff +
+   findings already fetched.
 9. ~~**Ticket-aware review.**~~ **Shipped (iteration 9):** the issues a PR closes are read
    (GraphQL `closingIssuesReferences`, keyword fallback), acceptance criteria are extracted,
    and a `spec` lens reports addressed/partial/not_addressed/unclear with `file:line` proof.
@@ -108,6 +110,23 @@ read this, do one iteration from "Backlog", append to "Iteration log", commit.**
 
 | 17 | 2026-10-19 | **Wave A of the beat-plan** (`temp/intel/buglens-v2-beat-plan-2026-10.md`): **deterministic adapter layer** (`adapters.py`: ruff, bandit, eslint, node-syntax, shellcheck, hadolint, rubocop, yamllint, php-syntax) whose hits post as ground-truth findings (`deterministic=True`, confidence 1.0) that bypass the model gate and are capped to added lines; **anchor re-anchor gate** (`diff.anchor_to_evidence` + `verify.machine_gate`): a drifted line snaps to its evidence quote and records `line_drift` instead of being dropped or posted on a wrong line; **check-run lite** (`post_check_run` / `check_run_conclusion` / `required_status_check`, fail-safe `neutral`); new `.buglens.yml` keys `linters` / `check_run_*` | Beat-plan Wave A; CodeRabbit "40+ scanners", reviewdog (MIT) adapter pattern, pr-agent | 145 tests pass (`test_adapters`, `test_verify` anchor, `test_rules`, `test_pipeline` lint merge) |
 | 18 | 2026-10-19 | **Wave B (W4) of the beat-plan**: **Change-Stack walkthrough** (`walkthrough.py`, deterministic path heuristics, no model) grouping changed files into ordered chapters (schema → models → logic → api → ui → config → tests → docs) with a note per chapter (file count, new count, top findings); **pre-merge checks** block (`_pre_merge_checks`, `pre_merge_checks` rule, default true, informational only); **opt-in `request_changes`** (default false; `_post` posts `REQUEST_CHANGES` only on a `blocking` verdict, `github.post_review` clamps the event) | Beat-plan Wave B; CodeRabbit/Graphite change-by-change walkthrough; backlog item 7 | 152 tests pass (`test_walkthrough` new; `test_pipeline` stack + pre-merge + request-changes opt-in; `test_rules` knobs) |
+| 19 | 2026-10-19 | **Wave C (W1)**: threaded **`@buglens` Q&A + commands** (`chat.py`): `review`/`re-review` hand back to the pipeline, `explain` (deterministic Change-Stack narrative), `why` (grounded in finding evidence), `fix` (Fix-All copy-ready prompt for Claude Code/Cursor/Codex), free-form `ask`; routed from `issue_comment` and `pull_request_review_comment`; honest fallback when the model is down | Beat-plan Wave C; all three competitors have PR chat; backlog item 8 | 163 tests pass (`test_chat` new; `test_webhook` chat routing; `test_pipeline` unchanged) |
+
+## Threaded `@buglens` Q&A + commands (iteration 19)
+The review is a broadcast; a mention is a conversation. CodeRabbit, Greptile and Bugbot all
+answer in the PR thread; we now do too, reusing the review's own context.
+
+- `chat.parse_command(body)` routes: `review`/`re-review` and a bare mention (or any mention
+  containing the word "review") re-run the review; `explain` / `why` / `fix` are explicit verbs
+  (a known verb wins, so `@buglens why did the review flag this` is a question); anything else
+  is a free-form `ask`.
+- `chat.answer(...)` reuses `pipeline.REVIEWABLE_EXTS` + `choose_paths` + `store.findings_for_pr`
+  (no second review pipeline). `explain` and the `handoff_prompts` Fix-All block are
+  deterministic; `why`/`ask` are one bounded `llm.complete_text` call, and on failure the reply
+  says the model is unreachable and shows the deterministic Change-Stack, never a guess.
+- `handle_command` posts an in-thread issue comment prefixed with `<!-- buglens:reply:<pr> -->`
+  and swallows post failures. The webhook routes mentions on both `issue_comment` and
+  `pull_request_review_comment` events.
 
 ## Change-Stack walkthrough + pre-merge checks (iteration 18)
 CodeRabbit spends a model call narrating the change; Graphite's "stack" is the shape reviewers

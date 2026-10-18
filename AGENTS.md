@@ -43,6 +43,7 @@ user says **"final"**. Never print or commit the token.
 | `indexer.py` | persistent code graph: stdlib-`ast`/regex parse, incremental `repo_index`, import graph, tests, PageRank retrieval, bounded context pack |
 | `recall.py` | prior-review/prior-PR recall: past findings by path (+ outcomes), dismissals, `file_prs` history, bounded recall block |
 | `walkthrough.py` | deterministic Change-Stack grouping: classify changed files into ordered chapters (schema→models→logic→api→ui→config→tests→docs), per-chapter notes; no model |
+| `chat.py` | threaded `@buglens` commands: `parse_command` routing, `answer` (deterministic Change-Stack for `explain`, one bounded `complete_text` for `why`/`ask`), `handoff_prompts` Fix-All, `handle_command` posts an in-thread reply |
 | `github.py` | REST **and GraphQL**: PR files (paginated), file content, inline review, upsert comment, check runs, `closingIssuesReferences`, issue fetch, PR/commit history |
 | `store.py` | SQLite: run idempotency, findings, **file_cache**, **repo_index**/**file_prs** (code graph + file history), delivery dedupe, outcomes → suppression |
 | `pipeline.py` | orchestration + `review_pr()` / `review_snippet()` |
@@ -71,9 +72,10 @@ Wiring: `routers/webhook.py` → `pipeline.review_pr`; `routers/review.py` → `
       repo-awareness; iteration 14 = scale/no-waste; iteration 15 = reliability; iteration 16 =
       cost+activation disclosure footer and re-review round cap/convergence; iteration 17 (Wave A)
       = deterministic adapters + anchor re-anchor gate + check-run lite; iteration 18 (Wave B) =
-      Change-Stack walkthrough + pre-merge checks + opt-in `request_changes`. **Full plan:
-      `../temp/intel/buglens-v2-beat-plan-2026-10.md` (Waves A–J).** Pre-merge checks shipped;
-      inline reply chat still open)*
+      Change-Stack walkthrough + pre-merge checks + opt-in `request_changes`; iteration 19 (Wave C) =
+      threaded `@buglens` Q&A + `/explain /why /fix` commands + Fix-All handoff. **Full plan:
+      `../temp/intel/buglens-v2-beat-plan-2026-10.md` (Waves A–J).** Inline reply chat shipped;
+      multi-model consensus (second model) still open)*
 
 ## Folding in competitor features (Phase 6, ongoing)
 Already lifted from the space: one-click **suggestion blocks** (Vercel openreview),
@@ -153,6 +155,22 @@ identity. `POST /api/v1/feedback` and `/engine/stats?repo=` expect `owner/repo`.
   whole hunk + the `pr_round_files` ledger (`first_round<round_no`); keep it deterministic.
 - The round-cap note uses its own marker (`pipeline.MARKER_CAP`); the convergence note reuses
   `MARKER` (it *is* the current review).
+
+## Chat and commands (iteration 19, do not regress)
+- **A known verb wins, else "review".** `chat.parse_command`: `@buglens review|re-review`,
+  `explain`, `why`, `fix` are explicit; a bare mention or any mention containing the word
+  "review" re-runs the review (historical behaviour); everything else is a free-form question.
+  Keep that precedence, `@buglens why did the review flag this` must stay a question.
+- **Chat re-uses review context, never a second pipeline.** `chat._gather` parses the PR diff,
+  loads effective rules and the posted findings (`store.findings_for_pr`); it does not call the
+  review engine. `REVIEWABLE_EXTS` is imported lazily from `pipeline` (avoid an import cycle).
+- **Only prose costs a model call, and it is bounded.** `explain` and `handoff_prompts` are
+  deterministic. `why`/`ask` make one `llm.complete_text` call; on failure `answer` returns the
+  honest "model is unreachable" note plus the deterministic Change-Stack, never a fabricated
+  answer.
+- **Replies are marked and posted as issue comments.** `handle_command` prefixes
+  `<!-- buglens:reply:<pr> -->` and posts via `github.post_issue_comment`; a post failure is
+  logged, never raised. `review` is handed back to the pipeline, not answered here.
 
 ## Walkthrough / Change-Stack (iteration 18, do not regress)
 - **`walkthrough.py` is pure and deterministic.** `classify(path)` is first-match-wins with a

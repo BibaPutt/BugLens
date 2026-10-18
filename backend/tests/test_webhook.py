@@ -6,7 +6,7 @@ from types import SimpleNamespace
 
 from fastapi.testclient import TestClient
 
-from buglens import pipeline
+from buglens import chat, pipeline
 from main import app
 
 SECRET = "test-secret"
@@ -164,3 +164,46 @@ def test_comment_without_mention_is_ignored(monkeypatch):
         "comment": {"body": "nice work", "user": {"login": "dev"}},
     }
     assert _post(payload, "issue_comment").json()["reason"] == "no-mention"
+
+
+def test_mention_chat_command_routes_to_chat(monkeypatch):
+    seen = {}
+    called = {"review": False}
+
+    async def fake_handle(owner, repo, number, body, db=None, head_sha=""):
+        seen.update(owner=owner, number=number, body=body)
+        return {"command": "explain", "posted": True}
+
+    async def fake_review(*a, **k):
+        called["review"] = True
+
+    monkeypatch.setattr(chat, "handle_command", fake_handle)
+    monkeypatch.setattr(pipeline, "review_pr", fake_review)
+    payload = {
+        "action": "created",
+        "repository": {"name": "r", "owner": {"login": "o"}},
+        "issue": {"number": 7, "pull_request": {"url": "x"}},
+        "comment": {"body": "@buglens explain the change", "user": {"login": "dev"}},
+    }
+    r = _post(payload, "issue_comment")
+    assert r.json()["status"] == "chatting" and r.json()["command"] == "explain"
+    assert seen["number"] == 7 and called["review"] is False
+
+
+def test_mention_in_review_comment_routes_to_chat(monkeypatch):
+    seen = {}
+
+    async def fake_handle(owner, repo, number, body, db=None, head_sha=""):
+        seen.update(number=number, body=body)
+        return {"command": "why", "posted": True}
+
+    monkeypatch.setattr(chat, "handle_command", fake_handle)
+    payload = {
+        "action": "created",
+        "repository": {"name": "r", "owner": {"login": "o"}},
+        "pull_request": {"number": 11},
+        "comment": {"body": "@buglens why does this matter?", "user": {"login": "dev"}},
+    }
+    r = _post(payload, "pull_request_review_comment")
+    assert r.json()["status"] == "chatting" and r.json()["command"] == "why"
+    assert seen["number"] == 11

@@ -66,6 +66,25 @@ A real finding is never lost and never posted on the wrong line.
 `consensus: 3` in `.buglens.yml` runs three shuffled passes and posts only what wins the
 majority. It costs 3x tokens and is off by default.
 
+## Chat and commands
+
+The review is a broadcast; a mention is a conversation. Comment anywhere on the PR (or reply
+in an inline review thread) and BugLens answers there, reusing the same context the review
+used: a digest of the added lines, the code graph block and the findings it already posted.
+
+| Comment | What happens |
+|---|---|
+| `@buglens review` / `@buglens re-review` / `@buglens` | runs a fresh review (on demand) |
+| `@buglens explain` | a deterministic Change-Stack narrative of what the PR changes |
+| `@buglens why` | why a finding matters, grounded in its evidence |
+| `@buglens fix` | a concrete fix plus a copy-ready Fix-All prompt for Claude Code, Cursor or Codex |
+| `@buglens <question>` | answers the question |
+
+Routing and the Change-Stack narrative are deterministic; only the prose is one bounded model
+call. If the model is unreachable the reply says so and falls back to what BugLens knows
+without it, rather than inventing an answer. A known verb wins, so `@buglens why did the
+review flag this` is a question, while `hey @buglens please review` re-runs the review.
+
 ## Deterministic linters (adapters)
 
 Beyond the model, the engine can run real linters/SAST on the added lines and fold their
