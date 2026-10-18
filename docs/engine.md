@@ -196,6 +196,52 @@ deterministic: no model call builds any of it.
 
 It stays on SQLite: no Redis, no Docker, no WSL, and it never blocks a PR.
 
+## Check runs and annotations
+
+The PR bot can publish its findings as a **check run** as well as review comments, so each one
+shows up in the GitHub **Files changed** tab and the Checks UI. It is opt-in
+(`post_check_run: true`, off by default) and needs the bot installed as a **GitHub App** with
+`checks:write`: GitHub only lets an App create check runs, so a `GITHUB_TOKEN` deployment gets a
+403. That 403 is swallowed, the review is unaffected, and a token-based deployment simply does
+not get the check run. Every check-run call is best-effort. The keys are in
+[configuration.md](configuration.md#check-runs-and-annotations).
+
+**Annotations.** Every finding with a resolvable line becomes an annotation: the file `path`, the
+finding `line` as both start and end line, a level, and a message built from the finding title
+plus its body and evidence. A finding with no line (a PR-level finding) cannot be annotated and
+is skipped. The level maps from severity:
+
+| Finding severity | Annotation level |
+|---|---|
+| `blocker` | `failure` |
+| `major` | `warning` |
+| `minor` | `notice` |
+| `nit` | `notice` |
+
+An annotation level of `failure` is display only: it does not set the check conclusion and does
+not block a merge. Only the run conclusion, and only when the check is required, can do that.
+
+**Cap and chunking.** At most `check_run_max_annotations` findings are published (default 200,
+blockers first). The GitHub API accepts at most 50 annotations per create or update call, so they
+go out in chunks of 50: the first chunk in the create call, each later chunk in a separate update
+that appends to the run rather than replacing it. Findings over the cap are counted and named in
+the run summary as `annotations: N shown, M over cap`.
+
+**One run by default.** `check_run_grouping: single` (default) publishes one run named
+`check_run_name`; `per_lens` publishes one run per lens, named `<check_run_name> (<lens>)`, for
+teams that want that.
+
+**Three input modes.** `check_run_input` sets only what goes into the run's output text;
+annotations are identical in all three. `pr_metadata` (default) writes a short summary of status,
+score, verdict, files and findings. `incremental` adds the lines this revision added. `full_diff`
+adds the whole unified diff of the changed files, truncated at the output cap with a
+`diff truncated (N files)` marker when cut.
+
+**Conclusion, never blocking by default.** `failure` is set only when
+`required_status_check: true` **and** the verdict is `blocking`; otherwise the configured
+`check_run_conclusion` (default `neutral`) is used, and a stray `failure` falls back to `neutral`
+when `required_status_check` is false. The bot never fails a build on its own.
+
 ## Repo rules (`.buglens.yml`)
 
 Rules are read from the PR's **base branch**, so a PR cannot change how it is reviewed.

@@ -99,6 +99,36 @@ def test_check_run_knobs_default_to_non_blocking():
     assert r2.post_check_run is True and r2.check_run_conclusion == "failure" and r2.required_status_check is True
 
 
+def test_check_run_new_keys_defaults():
+    r = load_rules()
+    assert r.check_run_input == "pr_metadata"
+    assert r.check_run_grouping == "single"
+    assert r.check_run_max_annotations == 200
+
+
+def test_check_run_new_keys_from_yaml():
+    r = load_rules({".buglens.yml": "check_run_input: full_diff\ncheck_run_grouping: per_lens\ncheck_run_max_annotations: 25\n"})
+    assert r.check_run_input == "full_diff"
+    assert r.check_run_grouping == "per_lens"
+    assert r.check_run_max_annotations == 25
+
+
+def test_check_run_keys_are_validated():
+    r = load_rules({".buglens.yml": "check_run_input: nonsense\ncheck_run_grouping: nonsense\ncheck_run_max_annotations: -5\n"})
+    assert r.check_run_input == "pr_metadata"
+    assert r.check_run_grouping == "single"
+    assert r.check_run_max_annotations == 0
+
+
+def test_describe_includes_check_run_keys():
+    from buglens.rules import describe
+
+    described = describe(load_rules())
+    assert described["check_run_input"] == "pr_metadata"
+    assert described["check_run_grouping"] == "single"
+    assert described["check_run_max_annotations"] == 200
+
+
 def test_pre_merge_and_request_changes_defaults():
     r = load_rules()
     assert r.pre_merge_checks is True and r.request_changes is False

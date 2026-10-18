@@ -113,6 +113,25 @@ read this, do one iteration from "Backlog", append to "Iteration log", commit.**
 | 19 | 2026-10-19 | **Wave C (W1)**: threaded **`@buglens` Q&A + commands** (`chat.py`): `review`/`re-review` hand back to the pipeline, `explain` (deterministic Change-Stack narrative), `why` (grounded in finding evidence), `fix` (Fix-All copy-ready prompt for Claude Code/Cursor/Codex), free-form `ask`; routed from `issue_comment` and `pull_request_review_comment`; honest fallback when the model is down | Beat-plan Wave C; all three competitors have PR chat; backlog item 8 | 163 tests pass (`test_chat` new; `test_webhook` chat routing; `test_pipeline` unchanged) |
 | 20 | 2026-10-19 | **Wave D (W2)**: **symbol/contract graph + ripple analysis** (`symbols.py`): `changed_defs` reads added signature lines (py/js/go/method), `ripple` lists in-repo callers, `ripple_block` feeds lenses, `ripple_findings` flags a changed signature that now demands a required argument while callers exist; pipeline fetches up to 6 related bodies to index their refs | Beat-plan Wave D; Greptile/Macroscope sell "knows what else breaks" | 169 tests pass (`test_symbols` new) |
 | 21 | 2026-10-19 | **Wave E (W5)**: **learning+** (`learn.py` + `store` additions): feedback advisories injected into the prompt, per-lens demotion by reaction history, human-approved `.buglens.yml` candidates via `GET /api/v1/engine/learn`, verifier drop rationales persisted (`drops`, `GET /engine/stats`) | Beat-plan Wave E; closes the "learns what you don't care about" gap with local data only | 195 tests pass (`test_learn`, `test_store_learn`, `test_engine_learn` new) |
+| 22 | 2026-10-19 | **Wave F (W8-full)**: **check-run parity with annotations** (`checks.py` pure mapper; `github.create_check_run`/`update_check_run`/`find_check_run`; `check_run_input` / `check_run_grouping` / `check_run_max_annotations` keys): findings become check annotations (severity→level), chunked 50 per call, three output modes, one check by default or per-lens opt-in, `failure` only when `required_status_check` | Beat-plan Wave F; matches CodeRabbit/Greptile Checks UI; needs a GitHub App, fail-soft on a PAT | 224 tests pass (`test_checks`, `test_github_checks`, pipeline check-run tests new) |
+
+## Check runs and annotations (iteration 22)
+The optional check run was a single, annotation-free `neutral` check. It now carries the findings.
+
+- `checks.py` is a pure mapper: `annotation_level` (blocker→failure, major→warning, minor/nit→
+  notice), `finding_to_annotation` (a PR-level finding has no line and is skipped),
+  `annotations_from_findings` (blockers first, then confidence, capped), `annotation_chunks`
+  (50 per GitHub call), `conclusion_for`, and `input_text` for the three modes.
+- `github.create_check_run` gained keyword-only `status`/`text`/`annotations` while keeping its
+  positional signature; `github.update_check_run` appends further annotation chunks (GitHub has no
+  per-call delete); `github.find_check_run` returns `None` on any non-2xx, because a PAT cannot
+  create check runs and must not blow up the review.
+- `check_run_input` (`pr_metadata` default | `incremental` | `full_diff`) controls only the check's
+  output text; `check_run_grouping` (`single` default | `per_lens`) controls how many checks are
+  created; `check_run_max_annotations` (default 200) caps how many findings are annotated.
+- `failure` remains gated on `required_status_check: true` plus a blocking verdict, so the check
+  still never blocks a PR by default. The footer names published annotations:
+  `check run: N annotation(s)`.
 
 ## Learning from feedback (iteration 21)
 The reaction loop already suppressed repeated fingerprints. This iteration lifts it from a single

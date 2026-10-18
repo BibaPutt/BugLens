@@ -133,6 +133,30 @@ never an error. No Docker and no WSL: they run as local subprocesses (timeout
 `BUGLENS_LINTER_TIMEOUT`, default 25s). Full detail in
 [engine.md](engine.md#deterministic-linters-adapters).
 
+### Check runs and annotations
+
+`post_check_run: true` publishes findings as check-run annotations, so they appear in the GitHub
+**Files changed** tab and the Checks UI, not only as review comments. It is **off by default**
+and requires installing the bot as a **GitHub App** with `checks:write`: GitHub only lets an App
+create check runs, so a token (`GITHUB_TOKEN`) deployment gets a 403 and simply no check run.
+Every check-run call is best-effort; a 403 is swallowed and nothing else is affected.
+
+| Key | Default | Notes |
+|---|---|---|
+| `post_check_run` | `false` | needs a GitHub App with `checks:write` |
+| `check_run_name` | `BugLens` | the run name; list this exact string as the required status context |
+| `check_run_conclusion` | `neutral` | `failure` needs `required_status_check: true` |
+| `required_status_check` | `false` | the only way a `failure` conclusion can be emitted |
+| `check_run_input` | `pr_metadata` | run output text: `full_diff`, `incremental`, or `pr_metadata`; annotations are the same in all three |
+| `check_run_grouping` | `single` | `single` (one run) or `per_lens` (one run per lens) |
+| `check_run_max_annotations` | `200` | findings published, blockers first; the GitHub API takes at most 50 per call |
+
+A `blocker` finding is a `failure` annotation, `major` is `warning`, and `minor` and `nit` are
+`notice`; a finding with no line is skipped. `failure` is emitted only when
+`required_status_check: true` and the verdict is `blocking`, and a stray `failure` falls back to
+`neutral` otherwise. The bot never fails a build on its own. Full detail in
+[engine.md](engine.md#check-runs-and-annotations).
+
 ## Supported languages
 
 Python, JavaScript, TypeScript, Java, Go, Rust, C, C++, C#, Ruby, PHP, Swift, Dart, Kotlin,

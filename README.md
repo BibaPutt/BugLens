@@ -64,6 +64,9 @@ Point the extension at your own backend with the `buglens.apiUrl` setting.
 - **Codebase-aware.** A persistent local index of the repo brings dependencies, importers,
   tests and earlier reviews into context, and ripple analysis names the callers of every
   function that changed.
+- **Findings in the Checks UI.** Opt-in check-run annotations surface every finding in the
+  Checks tab and the Files changed diff. They need a GitHub App install and never block a
+  merge by default.
 
 Full detail: **[docs/engine.md](docs/engine.md)**.
 

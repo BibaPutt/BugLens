@@ -22,7 +22,7 @@ import uuid
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 
-from . import adapters, github, indexer, learn, llm, prompts, recall, secretscan, store, symbols, tickets, verify, walkthrough
+from . import adapters, checks, github, indexer, learn, llm, prompts, recall, secretscan, store, symbols, tickets, verify, walkthrough
 from . import lenses as L
 from .context import build_context, extract_symbols, language_of
 from .diff import FileDiff, DiffLine, ADD, choose_paths, parse_patch
@@ -1162,23 +1162,80 @@ async def _review_pr(owner: str, repo: str, pr_number: int, *, base_sha: str | N
         await store.mark_posted(run_id, db)
     if rules.post_check_run and head_sha:
         # A check run can gate merges only when the operator asked for it. `failure` is
-        # never reachable unless `required_status_check` is true, so the bot stays
-        # non-blocking by default even with the check run switched on.
-        conclusion = str(getattr(rules, "check_run_conclusion", "neutral") or "neutral").lower()
-        if conclusion not in ("neutral", "success", "failure", "action_required"):
-            conclusion = "neutral"
-        if conclusion == "failure" and not getattr(rules, "required_status_check", False):
-            conclusion = "neutral"
-        name = getattr(rules, "check_run_name", None) or "BugLens"
+        # never reachable unless `required_status_check` is true, and a 403 (a PAT cannot
+        # create check runs) is swallowed, so the bot stays non-blocking by default.
         try:
-            await github.create_check_run(
-                owner, repo, head_sha, name, conclusion,
-                f"{name}: {res.verdict} ({res.score}/100)", res.summary,
-            )
+            published = await _publish_check_run(owner, repo, head_sha, res, rules, picked)
+            if published:
+                res.engine_notes.append(f"check run: {published} annotation(s)")
         except Exception:
             pass  # a status check is a nicety, never a reason to fail the review
     await store.finish_run(run_id, verdict, score, len(kept), res.posted, db)
     return res
+
+
+async def _publish_check_run(owner: str, repo: str, head_sha: str, res: ReviewResult,
+                             rules: Rules, picked: list) -> int:
+    """Best-effort check run with annotations; returns the annotation count published.
+
+    Annotations are chunked (GitHub accepts 50 per create/update call) and appended by later
+    updates. `failure` only ever comes from `checks.conclusion_for`, which needs
+    `required_status_check`, so the check never blocks by default.
+    """
+    name = getattr(rules, "check_run_name", None) or "BugLens"
+    required = bool(getattr(rules, "required_status_check", False))
+    base = str(getattr(rules, "check_run_conclusion", "neutral") or "neutral").lower()
+    conclusion = checks.conclusion_for(str(res.verdict or ""), base, required)
+    cap = int(getattr(rules, "check_run_max_annotations", 200) or 0)
+    mode = str(getattr(rules, "check_run_input", "pr_metadata") or "pr_metadata")
+    text = checks.input_text(mode, res, picked)
+    findings = res.findings or []
+
+    if str(getattr(rules, "check_run_grouping", "single") or "single") == "per_lens":
+        return await _publish_lens_checks(owner, repo, head_sha, res, name, conclusion,
+                                          cap, text, findings)
+
+    annotations, _dropped = checks.annotations_from_findings(findings, cap)
+    chunks = checks.annotation_chunks(annotations)
+    run = await github.create_check_run(
+        owner, repo, head_sha, name, conclusion,
+        f"{name}: {res.verdict} ({res.score}/100)", res.summary,
+        text=text, annotations=chunks[0] if chunks else None,
+    )
+    run_id = (run or {}).get("id")
+    for chunk in chunks[1:]:
+        if not run_id:
+            break
+        await github.update_check_run(owner, repo, int(run_id), conclusion=conclusion,
+                                      annotations=chunk)
+    return len(annotations)
+
+
+async def _publish_lens_checks(owner: str, repo: str, head_sha: str, res: ReviewResult,
+                               name: str, conclusion: str, cap: int, text: str,
+                               findings: list) -> int:
+    """One check run per lens (`check_run_grouping: per_lens`); returns annotations published."""
+    by_lens: dict[str, list] = {}
+    for f in findings:
+        by_lens.setdefault(str(f.get("lens") or "general"), []).append(f)
+    published = 0
+    for lens, group in sorted(by_lens.items()):
+        annotations, _dropped = checks.annotations_from_findings(group, cap)
+        chunks = checks.annotation_chunks(annotations)
+        lens_name = f"{name}: {lens}"
+        run = await github.create_check_run(
+            owner, repo, head_sha, lens_name, conclusion,
+            f"{lens}: {len(group)} finding(s)", res.summary,
+            text=text, annotations=chunks[0] if chunks else None,
+        )
+        run_id = (run or {}).get("id")
+        for chunk in chunks[1:]:
+            if not run_id:
+                break
+            await github.update_check_run(owner, repo, int(run_id), conclusion=conclusion,
+                                          annotations=chunk)
+        published += len(annotations)
+    return published
 
 
 async def _post(owner: str, repo: str, pr_number: int, head_sha: str, res: ReviewResult, rules: Rules) -> bool:

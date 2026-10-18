@@ -29,6 +29,9 @@ DEFAULTS = {
     "check_run_name": "BugLens",
     "check_run_conclusion": "neutral",
     "required_status_check": False,
+    "check_run_input": "pr_metadata",
+    "check_run_grouping": "single",
+    "check_run_max_annotations": 200,
     "linters": [],
     "require_evidence": True,
     "summary_only": False,
@@ -56,6 +59,9 @@ class Rules:
     check_run_name: str = "BugLens"
     check_run_conclusion: str = "neutral"   # neutral | success | failure; failure needs required_status_check
     required_status_check: bool = False
+    check_run_input: str = "pr_metadata"        # full_diff | incremental | pr_metadata
+    check_run_grouping: str = "single"          # single | per_lens
+    check_run_max_annotations: int = 200
     linters: list[str] = field(default_factory=list)   # [] off, ["auto"] all installed, or names
     require_evidence: bool = True
     summary_only: bool = False
@@ -187,6 +193,14 @@ def _to_rules(data: dict, source: str) -> Rules:
         r.max_rounds = 0
     if r.converge_rounds < 0:
         r.converge_rounds = 0
+    if r.check_run_input not in ("full_diff", "incremental", "pr_metadata"):
+        r.check_run_input = "pr_metadata"
+    if r.check_run_grouping not in ("single", "per_lens"):
+        r.check_run_grouping = "single"
+    try:
+        r.check_run_max_annotations = max(0, int(r.check_run_max_annotations))
+    except (TypeError, ValueError):
+        r.check_run_max_annotations = 200
     _ = rules_key
     return r
 
@@ -306,6 +320,9 @@ def describe(rules: Rules) -> dict:
         "post_check_run": rules.post_check_run,
         "check_run_conclusion": rules.check_run_conclusion,
         "required_status_check": rules.required_status_check,
+        "check_run_input": rules.check_run_input,
+        "check_run_grouping": rules.check_run_grouping,
+        "check_run_max_annotations": rules.check_run_max_annotations,
         "ignore_paths": rules.ignore_paths,
         "focus": rules.focus,
         "custom_rules": rules.custom_rules,

@@ -43,10 +43,11 @@ user says **"final"**. Never print or commit the token.
 | `indexer.py` | persistent code graph: stdlib-`ast`/regex parse, incremental `repo_index`, import graph, tests, PageRank retrieval, bounded context pack |
 | `symbols.py` | symbol/contract graph: `changed_defs` (added signature lines), `ripple` (in-repo callers), `ripple_block` (lens context), `ripple_findings` (cross-file inconsistency candidate, gated by verify) |
 | `learn.py` | pure, deterministic learning+: `lens_ranking` (demote down-voted lenses), `order_lenses`, `learn_block` (bounded feedback advisory for prompts), `candidate_rules` (human-approved `.buglens.yml` snippets, never auto-applied) |
+| `checks.py` | pure finding→check-run mapping: `annotation_level`, `finding_to_annotation`, `annotations_from_findings` (cap + ordering), `annotation_chunks` (50/call), `conclusion_for`, `input_text` (three modes) |
 | `recall.py` | prior-review/prior-PR recall: past findings by path (+ outcomes), dismissals, `file_prs` history, bounded recall block |
 | `walkthrough.py` | deterministic Change-Stack grouping: classify changed files into ordered chapters (schema→models→logic→api→ui→config→tests→docs), per-chapter notes; no model |
 | `chat.py` | threaded `@buglens` commands: `parse_command` routing, `answer` (deterministic Change-Stack for `explain`, one bounded `complete_text` for `why`/`ask`), `handoff_prompts` Fix-All, `handle_command` posts an in-thread reply |
-| `github.py` | REST **and GraphQL**: PR files (paginated), file content, inline review, upsert comment, check runs, `closingIssuesReferences`, issue fetch, PR/commit history |
+| `github.py` | REST **and GraphQL**: PR files (paginated), file content, inline review, upsert comment, check runs (create/update/find with annotations), `closingIssuesReferences`, issue fetch, PR/commit history |
 | `store.py` | SQLite: run idempotency, findings, **file_cache**, **repo_index**/**file_prs** (code graph + file history), delivery dedupe, outcomes → suppression, **drops** (verifier rationale) and learned lens/dismissal stats |
 | `pipeline.py` | orchestration + `review_pr()` / `review_snippet()` |
 
@@ -78,7 +79,9 @@ Wiring: `routers/webhook.py` → `pipeline.review_pr`; `routers/review.py` → `
       threaded `@buglens` Q&A + `/explain /why /fix` commands + Fix-All handoff; iteration 20 (Wave D) =
       symbol/contract graph + ripple analysis of changed signatures; iteration 21 (Wave E) =
       learning+: feedback advisories in the prompt, lens demotion by feedback, human-approved
-      `.buglens.yml` candidates (`/engine/learn`), verifier drop rationales persisted. **Full plan:
+      `.buglens.yml` candidates (`/engine/learn`), verifier drop rationales persisted; iteration 22 (Wave F) =
+      check-run parity: opt-in annotated check runs (severity→level map, 50-per-call chunking,
+      `check_run_input` modes, `check_run_grouping`, never blocking by default; needs a GitHub App). **Full plan:
       `../temp/intel/buglens-v2-beat-plan-2026-10.md` (Waves A–J).** Inline reply chat shipped;
       multi-model consensus (second model) still open)*
 
@@ -160,6 +163,27 @@ identity. `POST /api/v1/feedback` and `/engine/stats?repo=` expect `owner/repo`.
   whole hunk + the `pr_round_files` ledger (`first_round<round_no`); keep it deterministic.
 - The round-cap note uses its own marker (`pipeline.MARKER_CAP`); the convergence note reuses
   `MARKER` (it *is* the current review).
+
+## Check runs and annotations (iteration 22, do not regress)
+- **`checks.py` is pure.** Findings in, annotation dicts/strings out. No I/O, no model. The
+  severity→level map is fixed: `blocker`→`failure`, `major`→`warning`, `minor`/`nit`→`notice`.
+  A finding with no `line` (PR-level) has no annotation; `annotations_from_findings` returns
+  `(kept, dropped)` where `dropped = len(findings) - len(kept)`.
+- **Check runs need a GitHub App.** A PAT gets `403`; `find_check_run` must return `None` on any
+  non-2xx and never raise. The whole publish path is wrapped and best-effort: it must never fail
+  the review and must stay off unless `post_check_run: true`.
+- **Chunk at 50.** GitHub accepts at most 50 annotations per create/update and each update
+  *appends* (there is no delete/rewrite). Use `annotation_chunks` and `github.update_check_run`;
+  never send one giant list.
+- **Never block by default.** The conclusion comes only from `checks.conclusion_for(verdict, base,
+  required)`; it returns `failure` ONLY when `required_status_check: true` and the verdict is
+  `blocking`. All other paths fall back to `check_run_conclusion` (default `neutral`), and a stray
+  `failure` clamps to `neutral` when `required_status_check` is false.
+- **Three input modes, one skeleton.** `check_run_input` (`pr_metadata` default | `incremental` |
+  `full_diff`) controls only the `output` text, never the annotations. `check_run_grouping`
+  (`single` default | `per_lens`) only changes how many check runs are created.
+- **Name it in the footer.** When annotations publish, append `check run: N annotation(s)` to
+  `res.engine_notes` (iteration-16 "name every depth change" rule).
 
 ## Learning+ (iteration 21, do not regress)
 - **`learn.py` is pure.** Dicts in, strings/dicts out. No store, model, network, or I/O. Keep it

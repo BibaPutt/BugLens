@@ -23,6 +23,7 @@ MAX_FILES = 300
 MAX_TREE = 4000
 MAX_PAGES = 20
 ISSUE_BODY_CHARS = 4000
+OUTPUT_CAP = 65000
 
 
 class GitHubError(RuntimeError):
@@ -214,15 +215,77 @@ async def upsert_marked_comment(owner: str, repo: str, number: int, marker: str,
 
 
 async def create_check_run(owner: str, repo: str, head_sha: str, name: str,
-                           conclusion: str, title: str, summary: str) -> dict:
+                           conclusion: str, title: str, summary: str, *,
+                           status: str = "completed",
+                           text: str = "",
+                           annotations: list[dict] | None = None) -> dict:
+    """Create a check run. `annotations` are published with the initial output.
+
+    Payload keeps `output.title`/`output.summary`; adds `output.text` only when non-empty
+    and `output.annotations` only when the list is non-empty. `status` defaults to completed.
+    Non-2xx raises GitHubError (same message shape as today).
+    """
     payload = {
-        "name": name, "head_sha": head_sha, "status": "completed", "conclusion": conclusion,
-        "output": {"title": title[:255], "summary": summary[:65000]},
+        "name": name, "head_sha": head_sha, "status": status,
+        "output": {"title": title[:255], "summary": summary[:OUTPUT_CAP]},
     }
+    if status == "completed":
+        payload["conclusion"] = conclusion
+    if text:
+        payload["output"]["text"] = text[:OUTPUT_CAP]
+    if annotations:
+        payload["output"]["annotations"] = annotations
     resp = await _request("POST", f"{API}/repos/{owner}/{repo}/check-runs", json=payload)
     if resp.status_code not in (200, 201):
         raise GitHubError(f"create_check_run {resp.status_code}: {resp.text[:200]}")
     return resp.json()
+
+
+async def update_check_run(owner: str, repo: str, check_run_id: int, *,
+                           status: str = "completed",
+                           conclusion: str = "neutral",
+                           title: str = "",
+                           summary: str = "",
+                           text: str = "",
+                           annotations: list[dict] | None = None) -> dict:
+    """PATCH an existing check run. Only include output when any output field is non-empty.
+
+    Uses `PATCH {API}/repos/{owner}/{repo}/check-runs/{check_run_id}`. Non-2xx raises GitHubError.
+    """
+    payload: dict = {"status": status, "conclusion": conclusion}
+    out: dict = {}
+    if title:
+        out["title"] = title[:255]
+    if summary:
+        out["summary"] = summary[:OUTPUT_CAP]
+    if text:
+        out["text"] = text[:OUTPUT_CAP]
+    if annotations:
+        out["annotations"] = annotations
+    if out:
+        payload["output"] = out
+    resp = await _request("PATCH", f"{API}/repos/{owner}/{repo}/check-runs/{check_run_id}", json=payload)
+    if resp.status_code != 200:
+        raise GitHubError(f"update_check_run {resp.status_code}: {resp.text[:200]}")
+    return resp.json()
+
+
+async def find_check_run(owner: str, repo: str, head_sha: str, name: str) -> dict | None:
+    """Return the most recent check run with this name on this commit, or None.
+
+    Uses `GET {API}/repos/{owner}/{repo}/commits/{head_sha}/check-runs?check_name={name}&filter=latest&per_page=1`
+    and returns the first item of `check_runs`, or None when the list is empty or the call fails
+    (a 404/no-access must NOT raise: return None, because check runs need a GitHub App and a PAT
+    deployment will 403 here).
+    """
+    resp = await _request(
+        "GET", f"{API}/repos/{owner}/{repo}/commits/{head_sha}/check-runs",
+        params={"check_name": name, "filter": "latest", "per_page": 1},
+    )
+    if resp.status_code != 200:
+        return None
+    runs = resp.json().get("check_runs") or []
+    return runs[0] if runs else None
 
 
 # ── issues, tickets, history (context, not review) ─────────────────────────────

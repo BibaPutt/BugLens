@@ -260,6 +260,83 @@ async def test_verify_drops_are_persisted(monkeypatch, db):
     assert await store.drop_stats("o/r", db) == {"model": 1}
 
 
+async def test_publish_check_run_passes_annotations(monkeypatch, db):
+    cap = {}
+    monkeypatch.setattr(llm, "complete_json", _fake_llm)
+    _patch_github(monkeypatch, [{"filename": "a.py", "status": "modified", "patch": PATCH}])
+
+    async def fake_create(owner, repo, head_sha, name, conclusion, title, summary, **kw):
+        cap.update({"name": name, "conclusion": conclusion, "title": title,
+                    "annotations": kw.get("annotations"), "text": kw.get("text")})
+        return {"id": 9}
+
+    monkeypatch.setattr(github, "create_check_run", fake_create)
+    rules = load_rules()
+    rules.post_check_run = True
+
+    res = await pipeline.review_pr("o", "r", 1, db=db, rules=rules)
+
+    assert cap["name"] == "BugLens"
+    assert cap["conclusion"] == "neutral"
+    anns = cap["annotations"] or []
+    assert anns and anns[0]["annotation_level"] == "warning"
+    assert anns[0]["path"] == "a.py" and anns[0]["start_line"] == 2
+    assert cap["text"].startswith("r#1")
+    assert any(n.startswith("check run:") for n in res.engine_notes)
+
+
+async def test_check_run_disabled_makes_no_call(monkeypatch, db):
+    called = {}
+    monkeypatch.setattr(llm, "complete_json", _fake_llm)
+    _patch_github(monkeypatch, [{"filename": "a.py", "status": "modified", "patch": PATCH}])
+
+    async def fake_create(*a, **k):
+        called["yes"] = True
+        return {"id": 1}
+
+    monkeypatch.setattr(github, "create_check_run", fake_create)
+
+    await pipeline.review_pr("o", "r", 1, db=db)
+
+    assert "yes" not in called
+
+
+async def test_check_run_403_is_swallowed(monkeypatch, db):
+    monkeypatch.setattr(llm, "complete_json", _fake_llm)
+    _patch_github(monkeypatch, [{"filename": "a.py", "status": "modified", "patch": PATCH}])
+
+    async def forbidden(*a, **k):
+        raise github.GitHubError("403: resource not accessible by personal access token")
+
+    monkeypatch.setattr(github, "create_check_run", forbidden)
+    rules = load_rules()
+    rules.post_check_run = True
+
+    res = await pipeline.review_pr("o", "r", 1, db=db, rules=rules)
+
+    assert res is not None
+    assert not any(n.startswith("check run:") for n in res.engine_notes)
+
+
+async def test_check_run_per_lens_grouping(monkeypatch, db):
+    names = []
+    monkeypatch.setattr(llm, "complete_json", _fake_llm)
+    _patch_github(monkeypatch, [{"filename": "a.py", "status": "modified", "patch": PATCH}])
+
+    async def fake_create(owner, repo, head_sha, name, conclusion, title, summary, **kw):
+        names.append(name)
+        return {"id": 1}
+
+    monkeypatch.setattr(github, "create_check_run", fake_create)
+    rules = load_rules()
+    rules.post_check_run = True
+    rules.check_run_grouping = "per_lens"
+
+    await pipeline.review_pr("o", "r", 1, db=db, rules=rules)
+
+    assert names and all(n.startswith("BugLens:") for n in names)
+
+
 def test_review_effort_is_bounded():
     assert pipeline._review_effort([]) == 1
     assert 1 <= pipeline._review_effort([type("F", (), {"added_chars": 10 ** 6})()]) <= 5
