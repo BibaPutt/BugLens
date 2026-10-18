@@ -33,6 +33,8 @@ DEFAULTS = {
     "require_evidence": True,
     "summary_only": False,
     "check_ticket": True,
+    "pre_merge_checks": True,
+    "request_changes": False,
     "max_rounds": 10,
     "converge_rounds": 3,
 }
@@ -58,6 +60,8 @@ class Rules:
     require_evidence: bool = True
     summary_only: bool = False
     check_ticket: bool = True
+    pre_merge_checks: bool = True        # deterministic pre-merge checklist in the walkthrough
+    request_changes: bool = False        # opt-in: post REQUEST_CHANGES when the verdict is blocking
     max_rounds: int = 10                 # 0 disables the re-review cap
     converge_rounds: int = 3             # from round N+1 only code new since a prior round
     ignore_paths: list[str] = field(default_factory=list)
@@ -294,6 +298,8 @@ def describe(rules: Rules) -> dict:
         "skip_drafts": rules.skip_drafts,
         "skip_bot_prs": rules.skip_bot_prs,
         "skip_nits": rules.skip_nits,
+        "pre_merge_checks": rules.pre_merge_checks,
+        "request_changes": rules.request_changes,
         "max_rounds": rules.max_rounds,
         "converge_rounds": rules.converge_rounds,
         "linters": rules.linters,

@@ -99,6 +99,13 @@ def test_check_run_knobs_default_to_non_blocking():
     assert r2.post_check_run is True and r2.check_run_conclusion == "failure" and r2.required_status_check is True
 
 
+def test_pre_merge_and_request_changes_defaults():
+    r = load_rules()
+    assert r.pre_merge_checks is True and r.request_changes is False
+    r2 = load_rules({".buglens.yml": "pre_merge_checks: false\nrequest_changes: true\n"})
+    assert r2.pre_merge_checks is False and r2.request_changes is True
+
+
 # ── iteration 16: re-review cap / convergence knobs ───────────────────────────
 def test_round_knobs_load_and_validate():
     from buglens.rules import describe

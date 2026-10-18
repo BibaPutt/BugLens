@@ -148,6 +148,8 @@ linters: auto             # [] = off; "auto" = detect installed; or [ruff, eslin
 post_check_run: true      # add a neutral BugLens check run
 check_run_conclusion: neutral   # failure only when required_status_check: true
 required_status_check: false
+pre_merge_checks: true    # deterministic pre-merge checklist in the walkthrough
+request_changes: false    # opt-in: REQUEST_CHANGES when the verdict is blocking
 check_ticket: true        # validate linked issues against the diff
 max_rounds: 10            # stop after this many reviews of one PR (0 = no cap)
 converge_rounds: 3        # from round 4 only re-review files whose diff changed
@@ -159,6 +161,10 @@ custom_rules:
 Instruction files (`AGENTS.md`, `CLAUDE.md`, `.cursorrules`, `.cursor/rules/*.mdc`,
 `.github/copilot-instructions.md`) are also picked up, and their bullets become review
 rules for the files they cover.
+
+`request_changes` is the **only** setting that can ever post a blocking review. It defaults
+to `false`, and even when on it fires only on a `blocking` verdict (a blocker-severity
+finding). With it off, every review is `event=COMMENT` and never gates a merge.
 
 ## Custom lenses
 
@@ -185,9 +191,20 @@ Flag any HTTP call without a timeout, and retries without backoff. Cite the call
 
 ## Walkthrough
 
-Every PR summary includes a collapsible walkthrough: commits, review effort (1–5), files
-grouped by module, findings by severity, the ticket verdict, and **which context was used**
-(code graph file count, linked ticket, prior reviews) with the base SHA reviewed.
+Every PR summary includes a collapsible walkthrough: commits, review effort (1–5), findings
+by severity, the ticket verdict, and **which context was used** (code graph file count, linked
+ticket, prior reviews) with the base SHA reviewed.
+
+**Change stack.** Instead of a flat file list, the changed files are grouped into ordered
+chapters (Schema & migrations → Data models & types → Core logic → API & routes → UI →
+Config & infra → Tests → Docs), each with a one-line note: file count, how many are new, and
+any findings with their titles. This is pure path heuristics (`walkthrough.py`), no model
+call, so it reads like a reviewable stack for free.
+
+**Pre-merge checks.** A short deterministic checklist inside the walkthrough: whether test
+files moved with code changes, whether an issue is linked, whether secrets were flagged, and
+which linters ran. It states only what the engine actually observed. Turn it off with
+`pre_merge_checks: false`. It is informational and never blocks.
 
 ## Cost and disclosure
 

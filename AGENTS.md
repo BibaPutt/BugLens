@@ -17,7 +17,9 @@ user says **"final"**. Never print or commit the token.
 ## Ground rules (locked by the user)
 - **Provider-agnostic LLM.** OpenAI-compatible API. Default provider Groq; `OPENAI_BASE_URL`
   can point at a local proxy (e.g. `http://127.0.0.1:4096/v1`) for dev.
-- **Never block a PR.** Post `event=COMMENT` always (no `REQUEST_CHANGES`), never fail a build.
+- **Never block a PR by default.** Post `event=COMMENT` unless a repo sets
+  `request_changes: true` and the verdict is `blocking`; never fail a build. Max-recommended
+  guardrail stays off by default.
 - **One consolidated review per PR** (inline comments + one summary), never a comment storm.
 - **Evidence or it doesn't ship.** Every finding must be anchored to an added line and must
   survive the verify gate (`buglens/verify.py`). No proof → dropped.
@@ -40,6 +42,7 @@ user says **"final"**. Never print or commit the token.
 | `tickets.py` | linked-issue parse (keyword set) + acceptance-criteria extraction + ticket prompt block |
 | `indexer.py` | persistent code graph: stdlib-`ast`/regex parse, incremental `repo_index`, import graph, tests, PageRank retrieval, bounded context pack |
 | `recall.py` | prior-review/prior-PR recall: past findings by path (+ outcomes), dismissals, `file_prs` history, bounded recall block |
+| `walkthrough.py` | deterministic Change-Stack grouping: classify changed files into ordered chapters (schema→models→logic→api→ui→config→tests→docs), per-chapter notes; no model |
 | `github.py` | REST **and GraphQL**: PR files (paginated), file content, inline review, upsert comment, check runs, `closingIssuesReferences`, issue fetch, PR/commit history |
 | `store.py` | SQLite: run idempotency, findings, **file_cache**, **repo_index**/**file_prs** (code graph + file history), delivery dedupe, outcomes → suppression |
 | `pipeline.py` | orchestration + `review_pr()` / `review_snippet()` |
@@ -67,9 +70,10 @@ Wiring: `routers/webhook.py` → `pipeline.review_pr`; `routers/review.py` → `
       persistent code graph, prior-review recall, layered base-branch rules, IDE
       repo-awareness; iteration 14 = scale/no-waste; iteration 15 = reliability; iteration 16 =
       cost+activation disclosure footer and re-review round cap/convergence; iteration 17 (Wave A)
-      = deterministic adapters + anchor re-anchor gate + check-run lite. **Full plan:
-      `../temp/intel/buglens-v2-beat-plan-2026-10.md` (Waves A–J).** Pre-merge checks + inline
-      reply chat still open)*
+      = deterministic adapters + anchor re-anchor gate + check-run lite; iteration 18 (Wave B) =
+      Change-Stack walkthrough + pre-merge checks + opt-in `request_changes`. **Full plan:
+      `../temp/intel/buglens-v2-beat-plan-2026-10.md` (Waves A–J).** Pre-merge checks shipped;
+      inline reply chat still open)*
 
 ## Folding in competitor features (Phase 6, ongoing)
 Already lifted from the space: one-click **suggestion blocks** (Vercel openreview),
@@ -149,6 +153,20 @@ identity. `POST /api/v1/feedback` and `/engine/stats?repo=` expect `owner/repo`.
   whole hunk + the `pr_round_files` ledger (`first_round<round_no`); keep it deterministic.
 - The round-cap note uses its own marker (`pipeline.MARKER_CAP`); the convergence note reuses
   `MARKER` (it *is* the current review).
+
+## Walkthrough / Change-Stack (iteration 18, do not regress)
+- **`walkthrough.py` is pure and deterministic.** `classify(path)` is first-match-wins with a
+  fixed precedence (tests, docs, migration, model, api, ui, config → else logic); `build_change_stack`
+  only groups files and attaches findings. No model, no network, no I/O. Keep it that way, the
+  walkthrough must render identically from the same inputs.
+- **The stack replaces the flat module list.** Render order is the chapter display order
+  (`_ORDER`), not insertion order; a chapter with no files is dropped.
+- **Pre-merge checks assert observed facts only.** `_pre_merge_checks` lists tests/issue/secrets/
+  linters/round from real signals; never add a check that guesses. Gate on `rules.pre_merge_checks`
+  (default true); it is informational and never blocks.
+- **`request_changes` is the only blocking path, and it is opt-in.** `_post` chooses
+  `REQUEST_CHANGES` only when `rules.request_changes` is true *and* `res.verdict == "blocking"`;
+  `github.post_review` clamps any other event to `COMMENT`. The default must stay `COMMENT`.
 
 ## Deterministic adapters + anchor gate (iteration 17, do not regress)
 - **Adapters are opt-in and must never be required.** `linters` defaults to `[]` (off);

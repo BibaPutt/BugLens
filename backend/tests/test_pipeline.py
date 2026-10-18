@@ -44,10 +44,11 @@ def _patch_github(monkeypatch, files, *, capture=None):
     async def get_content(*a, **k):
         return "x = 1\nbad = eval(user_input)\nprint(x)\n"
 
-    async def post_review(owner, repo, number, commit_id, body, comments):
+    async def post_review(owner, repo, number, commit_id, body, comments, event="COMMENT"):
         if capture is not None:
             capture["comments"] = comments
             capture["body"] = body
+            capture["event"] = event
         return {"id": 1}
 
     async def no_issues(*a, **k):
@@ -96,6 +97,45 @@ async def test_review_pr_merges_deterministic_linter_findings(monkeypatch, db):
     assert "lint" in res.lenses_run
     assert any(f.get("linter") == "ruff" and f.get("deterministic") for f in res.findings)
     assert any("linters: ruff" in n for n in res.engine_notes)
+
+
+async def test_walkthrough_renders_change_stack_and_pre_merge(monkeypatch, db):
+    monkeypatch.setattr(llm, "complete_json", _fake_llm)
+    _patch_github(monkeypatch, [{"filename": "a.py", "status": "modified", "patch": PATCH}])
+
+    res = await pipeline.review_pr("o", "r", 1, dry_run=True, db=db)
+    md = pipeline.render_summary_md(res, load_rules())
+
+    assert "Change stack" in md
+    assert "**Core logic**" in md
+    assert "Pre-merge checks" in md
+    assert "Secrets: none" in md
+
+    rules = load_rules()
+    rules.pre_merge_checks = False
+    assert "Pre-merge checks" not in pipeline.render_summary_md(res, rules)
+
+
+async def test_post_requests_changes_is_opt_in_and_only_when_blocking(monkeypatch, db):
+    cap = {}
+    _patch_github(monkeypatch, [], capture=cap)
+    blocking = pipeline.ReviewResult(verdict="blocking", findings=[
+        {"path": "a.py", "line": 2, "severity": "blocker", "title": "t", "body": "b"},
+    ])
+
+    rules = load_rules()
+    assert await pipeline._post("o", "r", 1, "sha", blocking, rules)
+    assert cap["event"] == "COMMENT"                      # default never blocks
+
+    rules.request_changes = True
+    assert await pipeline._post("o", "r", 1, "sha", blocking, rules)
+    assert cap["event"] == "REQUEST_CHANGES"
+
+    calm = pipeline.ReviewResult(verdict="needs-attention", findings=[
+        {"path": "a.py", "line": 2, "severity": "major", "title": "t", "body": "b"},
+    ])
+    assert await pipeline._post("o", "r", 1, "sha", calm, rules)
+    assert cap["event"] == "COMMENT"                      # only for a blocking verdict
 
 
 async def test_review_pr_is_idempotent_per_revision(monkeypatch, db):

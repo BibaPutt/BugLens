@@ -102,6 +102,12 @@ been reviewed that many times, and `converge_rounds` (default `3`) switches to *
 reviews after that many rounds (deterministic: a file is only re-reviewed if its diff actually
 changed). Set either to `0` to disable it.
 
+Two keys govern the summary body and merge behaviour: `pre_merge_checks` (default `true`) adds
+a deterministic checklist to the walkthrough (tests moved, issue linked, secrets, linters), and
+`request_changes` (default `false`) is the only way BugLens can ever post a blocking review. It
+posts `REQUEST_CHANGES` **only** when the verdict is `blocking` (a blocker-severity finding);
+off, every review is `event=COMMENT`.
+
 ### Deterministic linters
 
 Run real linters/SAST locally and fold their output in as **ground-truth findings** (they skip

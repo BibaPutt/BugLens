@@ -44,8 +44,9 @@ read this, do one iteration from "Backlog", append to "Iteration log", commit.**
 6. **Multi-model consensus** for high-severity findings only (cheap second model; drop
    if they disagree): optional, off by default. *Multi-pass consensus (shuffled diffs +
    majority vote, `consensus:` rule) shipped in iteration 3; a second model is still open.*
-7. **`REQUEST_CHANGES` opt-in** via `.buglens.yml` for teams that want a hard gate
-   (still never the default).
+7. ~~**`REQUEST_CHANGES` opt-in** via `.buglens.yml` for teams that want a hard gate
+   (still never the default).~~ **Shipped (iteration 18):** `request_changes: true` posts
+   `REQUEST_CHANGES` only on a `blocking` verdict; the default stays `COMMENT` forever.
 8. **Inline reply chat**: reply to a thread on a BugLens comment (like the Gitea bot's
    conversational mode) using the file context we already fetched.
 9. ~~**Ticket-aware review.**~~ **Shipped (iteration 9):** the issues a PR closes are read
@@ -106,6 +107,24 @@ read this, do one iteration from "Backlog", append to "Iteration log", commit.**
 | 16 | 2026-10-18 | **Honesty + convergence pass** (from the 13-post PR-review learning wave, `temp/intel/buglens-pr-review-learning-2026-10.md`): every consolidated review now ends with an **`Engine:` cost line**: calls, failures, tokens (only when the provider reports them) and wall-clock, with a **dollar figure only when `BUGLENS_COST_PER_1M_IN/_OUT` are set** (never invented), plus a plain line disclosing every optional layer that changed depth (consensus N, verify stats, secret scan, ticket check, code graph, recall, partial failures). **Re-review discipline**: `max_rounds` (10) and `converge_rounds` (3) in `.buglens.yml`: past `converge_rounds` only files whose reviewed content changed are re-reviewed (deterministic content hash, `pr_round_files` ledger), and past `max_rounds` a round-cap note is upserted and the bot stops (the agent-writes / agent-reviews loop is the documented #1 cost sink) | Learning wave: usage-trust backlash (#5), revert-rate guardrail (#3), Codex denial circuit-breaker (#4), Cursor sub-4-min budget (#12) | 132 tests pass (`test_pipeline` footer/round-cap/convergence, `test_store` round ledger, `test_rules` knobs), boot smoke |
 
 | 17 | 2026-10-19 | **Wave A of the beat-plan** (`temp/intel/buglens-v2-beat-plan-2026-10.md`): **deterministic adapter layer** (`adapters.py`: ruff, bandit, eslint, node-syntax, shellcheck, hadolint, rubocop, yamllint, php-syntax) whose hits post as ground-truth findings (`deterministic=True`, confidence 1.0) that bypass the model gate and are capped to added lines; **anchor re-anchor gate** (`diff.anchor_to_evidence` + `verify.machine_gate`): a drifted line snaps to its evidence quote and records `line_drift` instead of being dropped or posted on a wrong line; **check-run lite** (`post_check_run` / `check_run_conclusion` / `required_status_check`, fail-safe `neutral`); new `.buglens.yml` keys `linters` / `check_run_*` | Beat-plan Wave A; CodeRabbit "40+ scanners", reviewdog (MIT) adapter pattern, pr-agent | 145 tests pass (`test_adapters`, `test_verify` anchor, `test_rules`, `test_pipeline` lint merge) |
+| 18 | 2026-10-19 | **Wave B (W4) of the beat-plan**: **Change-Stack walkthrough** (`walkthrough.py`, deterministic path heuristics, no model) grouping changed files into ordered chapters (schema → models → logic → api → ui → config → tests → docs) with a note per chapter (file count, new count, top findings); **pre-merge checks** block (`_pre_merge_checks`, `pre_merge_checks` rule, default true, informational only); **opt-in `request_changes`** (default false; `_post` posts `REQUEST_CHANGES` only on a `blocking` verdict, `github.post_review` clamps the event) | Beat-plan Wave B; CodeRabbit/Graphite change-by-change walkthrough; backlog item 7 | 152 tests pass (`test_walkthrough` new; `test_pipeline` stack + pre-merge + request-changes opt-in; `test_rules` knobs) |
+
+## Change-Stack walkthrough + pre-merge checks (iteration 18)
+CodeRabbit spends a model call narrating the change; Graphite's "stack" is the shape reviewers
+actually want. Ours is deterministic (`walkthrough.py`):
+
+- `classify(path)` puts each changed file in one chapter, first-match-wins, with a fixed
+  precedence so `tests/test_models.py` is a test and not a model.
+- `build_change_stack(files, findings)` returns chapters in dependency display order
+  (schema → models → logic → api → ui → config → tests → docs), each with a note: `N file(s)`,
+  how many are new, and any findings (count + top titles). No model, no I/O; same input, same
+  output.
+- `_walkthrough_md` renders the stack and, when `pre_merge_checks` is on, a short checklist
+  (`_pre_merge_checks`): tests moved with code, issue linked, secrets flagged, linters that ran,
+  re-review round. It states only what the engine observed; it never blocks.
+- `request_changes` (default false) is the single blocking path: `_post` posts
+  `REQUEST_CHANGES` only when the rule is on **and** the verdict is `blocking`; otherwise
+  `COMMENT`. `github.post_review` accepts an `event` and clamps anything unexpected to `COMMENT`.
 
 ## Deterministic adapters + anchor gate (iteration 17)
 Wave A of the beat-plan: ground-truth tool output, and no more wrong-line comments.

@@ -155,13 +155,16 @@ async def get_repo_tree(owner: str, repo: str, ref: str) -> list[str]:
 
 
 async def post_review(owner: str, repo: str, number: int, commit_id: str, body: str,
-                      comments: list[dict]) -> dict:
-    """One consolidated review (event=COMMENT) with inline comments.
+                      comments: list[dict], event: str = "COMMENT") -> dict:
+    """One consolidated review with inline comments.
 
     ``comments`` items: {"path", "line", "side": "RIGHT", "body"}.
+    ``event`` is COMMENT by default; REQUEST_CHANGES only when a repo opted in.
     Raises GitHubError on failure so callers never report false success.
     """
-    payload = {"commit_id": commit_id, "body": body, "event": "COMMENT", "comments": comments}
+    if event not in ("COMMENT", "REQUEST_CHANGES"):
+        event = "COMMENT"
+    payload = {"commit_id": commit_id, "body": body, "event": event, "comments": comments}
     resp = await _request("POST", f"{API}/repos/{owner}/{repo}/pulls/{number}/reviews", json=payload)
     if resp.status_code not in (200, 201):
         raise GitHubError(f"post_review {resp.status_code}: {resp.text[:300]}")

@@ -22,7 +22,7 @@ import uuid
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 
-from . import adapters, github, indexer, llm, prompts, recall, secretscan, store, tickets, verify
+from . import adapters, github, indexer, llm, prompts, recall, secretscan, store, tickets, verify, walkthrough
 from . import lenses as L
 from .context import build_context, extract_symbols, language_of
 from .diff import FileDiff, DiffLine, ADD, choose_paths, parse_patch
@@ -70,6 +70,8 @@ class ReviewResult:
     round_no: int = 0
     converging: bool = False
     engine_notes: list[str] = field(default_factory=list)
+    change_stack: list[dict] = field(default_factory=list)
+    pre_merge: list[str] = field(default_factory=list)
 
 
 # ── one file / one lens ───────────────────────────────────────────────────────
@@ -562,17 +564,33 @@ def _context_sources(tree: list[str], file_texts: dict[str, str], custom_lens_na
     return sources[:8]
 
 
-def _walkthrough_md(res: ReviewResult) -> list[str]:
+def _pre_merge_checks(picked: list[FileDiff], ticket_summary: str, linters_run: list[str],
+                      secrets_flagged: bool, round_no: int, rules: Rules) -> list[str]:
+    """Deterministic pre-merge checklist. Asserts only what we actually know, never a guess."""
+    kinds = [walkthrough.classify(fd.path) for fd in picked]
+    code = [k for k in kinds if k not in ("tests", "docs")]
+    tests = kinds.count("tests")
+    checks: list[str] = []
+    if code and not tests:
+        checks.append("Tests: code changed, no test files touched")
+    elif tests:
+        checks.append(f"Tests: {tests} test file(s) updated")
+    if getattr(rules, "check_ticket", True):
+        checks.append("Linked issue: linked" if ticket_summary else "Linked issue: none linked")
+    checks.append("Secrets: flagged" if secrets_flagged else "Secrets: none")
+    if linters_run:
+        checks.append(f"Linters: {', '.join(linters_run)}")
+    if round_no > 1:
+        checks.append(f"Re-review: round {round_no}")
+    return checks[:8]
+
+
+def _walkthrough_md(res: ReviewResult, rules: Rules) -> list[str]:
     effort = "⬤" * res.review_effort + "◯" * (5 - res.review_effort)
     counts: dict[str, int] = {}
     for f in res.findings:
         counts[f.get("severity") or "info"] = counts.get(f.get("severity") or "info", 0) + 1
     sev_line = " · ".join(f"{sev.emoji(s)} {sev.label(s)} {c}" for s, c in counts.items()) or "none"
-    modules: dict[str, int] = {}
-    by_path = {f["path"]: f for f in res.findings if f.get("path")}
-    for path in res.files:
-        top = path.split("/")[0] if "/" in path else "."
-        modules[top] = modules.get(top, 0) + (1 if path in by_path else 0)
     lines = ["", "<details><summary>Walkthrough</summary>", ""]
     commits = f"`{(res.base_sha or '?')[:7]}` → `{(res.head_sha or '?')[:7]}`"
     lines.append(f"**Commits:** {commits}")
@@ -580,9 +598,13 @@ def _walkthrough_md(res: ReviewResult) -> list[str]:
     lines.append(f"**Findings:** {sev_line}")
     if res.ticket_summary:
         lines.append(f"**Ticket:** {res.ticket_summary}")
-    if res.files:
-        lines += ["", f"**Files reviewed ({len(res.files)}):**", ""]
-        lines += [f"- `{m}`, {n} finding(s)" if n else f"- `{m}`" for m, n in sorted(modules.items())[:15]]
+    if res.change_stack:
+        lines += ["", f"**Change stack ({len(res.files)} file(s)):**", ""]
+        for ch in res.change_stack[:12]:
+            lines.append(f"- **{ch['title']}** ({ch['note']})")
+    if getattr(rules, "pre_merge_checks", True) and res.pre_merge:
+        lines += ["", "**Pre-merge checks:**"]
+        lines += [f"- {c}" for c in res.pre_merge]
     if res.context_sources:
         lines += ["", f"**Context used:** {', '.join(f'`{s}`' for s in res.context_sources)}"]
     lines += ["", "</details>"]
@@ -598,7 +620,7 @@ def render_summary_md(res: ReviewResult, rules: Rules) -> str:
         "",
         res.summary or "",
     ]
-    lines += _walkthrough_md(res)
+    lines += _walkthrough_md(res, rules)
     if res.highlights:
         lines += ["", "### Highlights"]
         lines += [f"- {h}" for h in res.highlights]
@@ -1040,6 +1062,9 @@ async def _review_pr(owner: str, repo: str, pr_number: int, *, base_sha: str | N
         engine_notes=_engine_notes(rules, verified, all_findings, bool(ticket_block),
                                    graph_files, bool(recall_text), calls, failures, converging,
                                    linters_run=linters_run),
+        change_stack=walkthrough.build_change_stack(picked, kept),
+        pre_merge=_pre_merge_checks(picked, ticket_summary, linters_run,
+                                    "secrets" in lenses_run, round_no, rules),
     )
 
     try:                                   # findings are best-effort; never cost the review
@@ -1106,9 +1131,13 @@ async def _post(owner: str, repo: str, pr_number: int, head_sha: str, res: Revie
                 "path": f["path"], "line": int(f["line"]), "side": "RIGHT",
                 "body": render_finding_md(f),
             })
+    # Requesting changes is opt-in and only for a blocking verdict, so the default stays
+    # COMMENT for every repo that did not ask to be gated.
+    event = "REQUEST_CHANGES" if (getattr(rules, "request_changes", False) and res.verdict == "blocking") else "COMMENT"
     try:
-        if inline:
-            await github.post_review(owner, repo, pr_number, head_sha, render_summary_md(res, rules), inline)
+        if inline or event != "COMMENT":
+            await github.post_review(owner, repo, pr_number, head_sha, render_summary_md(res, rules),
+                                     inline, event=event)
             return True
         await github.upsert_marked_comment(owner, repo, pr_number, MARKER, render_summary_md(res, rules))
         return True

@@ -51,6 +51,9 @@ Point the extension at your own backend with the `buglens.apiUrl` setting.
 - **Real tools, not vibes.** Turn on `linters:` and local linters/SAST (ruff, bandit, eslint,
   shellcheck, hadolint and more) fold their output in as ground-truth findings the model cannot
   argue away. No Docker, no WSL, missing tools are simply skipped.
+- **Reads as a stack, not a dump.** The walkthrough groups the diff into ordered chapters
+  (schema, models, logic, api, ui, config, tests, docs) with a deterministic pre-merge
+  checklist, so you review the change bottom-up.
 - **One review per PR.** Never a comment storm; pushes don't duplicate comments.
 - **Learns.** 👍/👎 reactions suppress repeated noise and promote patterns into future
   prompts. On merge it checks whether each finding was actually fixed.
