@@ -22,7 +22,7 @@ import uuid
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 
-from . import adapters, checks, github, indexer, learn, llm, prompts, recall, secretscan, store, symbols, tickets, verify, walkthrough
+from . import adapters, checks, github, indexer, learn, llm, objects, prompts, recall, secretscan, store, symbols, tickets, verify, walkthrough
 from . import lenses as L
 from .context import build_context, extract_symbols, language_of
 from .diff import FileDiff, DiffLine, ADD, choose_paths, parse_patch
@@ -1075,6 +1075,15 @@ async def _review_pr(owner: str, repo: str, pr_number: int, *, base_sha: str | N
     if rules.skip_nits:
         fresh = [f for f in fresh if f["severity"] != "nit"]
     kept, over_budget = sev.budget(fresh, rules.max_comments, rules.min_severity)
+    kept, capped = sev.apply_lens_caps(kept, getattr(rules, "lens_caps", None))
+    over_budget = over_budget + capped
+    cap_counts: dict[str, int] = {}
+    for f in capped:
+        lens = str(f.get("lens") or "unknown")
+        cap_counts[lens] = cap_counts.get(lens, 0) + 1
+    units = objects.build_units(picked)
+    for f in kept:
+        f["symbol"] = objects.symbol_for(f.get("path"), f.get("line"), units)
 
     summary, score, verdict, highlights, s_positives, s_usage = await _summarise(
         kept, [fd.path for fd in picked], sorted(lenses_run), skipped
@@ -1131,6 +1140,12 @@ async def _review_pr(owner: str, repo: str, pr_number: int, *, base_sha: str | N
         await store.save_findings(run_id, kept, db)
     except Exception:
         pass
+
+    obj_note = objects.unit_summary(units)
+    if obj_note:
+        res.engine_notes.append(f"code objects: {obj_note}")
+    for lens in sorted(cap_counts):
+        res.engine_notes.append(f"lens caps: {lens} {cap_counts[lens]}")
 
     if db:                                 # ledger of what this round actually reviewed
         try:

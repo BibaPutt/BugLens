@@ -45,6 +45,7 @@ user says **"final"**. Never print or commit the token.
 | `learn.py` | pure, deterministic learning+: `lens_ranking` (demote down-voted lenses), `order_lenses`, `learn_block` (bounded feedback advisory for prompts), `candidate_rules` (human-approved `.buglens.yml` snippets, never auto-applied) |
 | `checks.py` | pure finding→check-run mapping: `annotation_level`, `finding_to_annotation`, `annotations_from_findings` (cap + ordering), `annotation_chunks` (50/call), `conclusion_for`, `input_text` (three modes) |
 | `recall.py` | prior-review/prior-PR recall: past findings by path (+ outcomes), dismissals, `file_prs` history, bounded recall block |
+| `objects.py` | pure code-object units: `build_units` (group a file's added lines by enclosing changed symbol, `<file>` fallback), `symbol_for` (tag a finding with its unit), `unit_summary` (footer string) |
 | `walkthrough.py` | deterministic Change-Stack grouping: classify changed files into ordered chapters (schema→models→logic→api→ui→config→tests→docs), per-chapter notes; no model |
 | `chat.py` | threaded `@buglens` commands: `parse_command` routing, `answer` (deterministic Change-Stack for `explain`, one bounded `complete_text` for `why`/`ask`), `handoff_prompts` Fix-All, `handle_command` posts an in-thread reply |
 | `github.py` | REST **and GraphQL**: PR files (paginated), file content, inline review, upsert comment, check runs (create/update/find with annotations), `closingIssuesReferences`, issue fetch, PR/commit history |
@@ -81,7 +82,10 @@ Wiring: `routers/webhook.py` → `pipeline.review_pr`; `routers/review.py` → `
       learning+: feedback advisories in the prompt, lens demotion by feedback, human-approved
       `.buglens.yml` candidates (`/engine/learn`), verifier drop rationales persisted; iteration 22 (Wave F) =
       check-run parity: opt-in annotated check runs (severity→level map, 50-per-call chunking,
-      `check_run_input` modes, `check_run_grouping`, never blocking by default; needs a GitHub App). **Full plan:
+      `check_run_input` modes, `check_run_grouping`, never blocking by default; needs a GitHub App);
+      iteration 23 (Wave G) = code-object lensing: findings grouped by their enclosing changed
+      symbol (`objects.py`, `<file>` fallback) and opt-in per-lens comment caps (`lens_caps`).
+      **Full plan:
       `../temp/intel/buglens-v2-beat-plan-2026-10.md` (Waves A–J).** Inline reply chat shipped;
       multi-model consensus (second model) still open)*
 
@@ -163,6 +167,19 @@ identity. `POST /api/v1/feedback` and `/engine/stats?repo=` expect `owner/repo`.
   whole hunk + the `pr_round_files` ledger (`first_round<round_no`); keep it deterministic.
 - The round-cap note uses its own marker (`pipeline.MARKER_CAP`); the convergence note reuses
   `MARKER` (it *is* the current review).
+
+## Code objects and per-lens caps (iteration 23, do not regress)
+- **`objects.py` is pure and deterministic.** `build_units` reuses `symbols.changed_defs` (it does
+  not re-parse) and assigns each added line to the last definition at or before it; lines above any
+  definition belong to `<file>`. Ordered by `start_line`, capped at `MAX_UNITS`.
+- **Findings are tagged, not rewritten.** `symbol_for` sets `f["symbol"]` on kept findings so the
+  API/IDE can group them by symbol. Never use the symbol to change the comment body or the anchor.
+- **`lens_caps` is opt-in and empty by default.** It caps how many comments one lens contributes to
+  the single comment; the global `max_comments` (12) still applies first, and the
+  severity-then-confidence order is preserved, so a capped lens keeps its top findings only.
+  Values clamp to `>= 0`; malformed entries drop. A cap of `0` silences a lens without disabling it.
+- **Name it in the footer.** `code objects: N unit(s) across M file(s)` (via `unit_summary`) and one
+  `lens caps: <lens> N` line per lens actually capped (iteration-16 "name every depth change" rule).
 
 ## Check runs and annotations (iteration 22, do not regress)
 - **`checks.py` is pure.** Findings in, annotation dicts/strings out. No I/O, no model. The

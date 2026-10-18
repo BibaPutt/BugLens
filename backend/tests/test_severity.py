@@ -43,3 +43,20 @@ def test_score_decreases_and_clamps():
     assert sev.score_from_findings([{"severity": "blocker"}, {"severity": "blocker"},
                                     {"severity": "blocker"}, {"severity": "blocker"},
                                     {"severity": "blocker"}]) == 0
+
+def test_apply_lens_caps_limits_per_lens():
+    findings = [
+        {"severity": "major", "lens": "security", "path": "a", "line": 1},
+        {"severity": "minor", "lens": "security", "path": "a", "line": 2},
+        {"severity": "minor", "lens": "ui", "path": "a", "line": 3},
+        {"severity": "nit", "path": "a", "line": 4},
+    ]
+    kept, dropped = sev.apply_lens_caps(findings, {"security": 1})
+    assert [f["line"] for f in kept] == [1, 3, 4]
+    assert [f["line"] for f in dropped] == [2]
+
+
+def test_apply_lens_caps_no_caps_is_a_noop():
+    findings = [{"lens": "security"}, {"lens": "ui"}]
+    kept, dropped = sev.apply_lens_caps(findings, {})
+    assert kept == findings and dropped == []

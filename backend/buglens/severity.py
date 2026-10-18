@@ -47,6 +47,28 @@ def budget(findings: list, max_comments: int, min_severity: str | None = None):
     return kept, dropped
 
 
+def apply_lens_caps(findings: list, caps: dict | None):
+    """Keep at most caps[lens] findings per lens, order preserved. Returns (kept, dropped).
+
+    A lens absent from caps is uncapped. Findings with no lens count as "unknown".
+    """
+    if not caps:
+        return list(findings), []
+    used: dict[str, int] = {}
+    kept: list = []
+    dropped: list = []
+    for f in findings:
+        lens = str(f.get("lens") or "unknown")
+        limit = caps.get(lens)
+        if limit is None or used.get(lens, 0) < limit:
+            if limit is not None:
+                used[lens] = used.get(lens, 0) + 1
+            kept.append(f)
+        else:
+            dropped.append(f)
+    return kept, dropped
+
+
 LABELS = {"blocker": "Blocker", "major": "Major", "minor": "Minor", "nit": "Nit"}
 EMOJI = {"blocker": "🔴", "major": "🟠", "minor": "🟡", "nit": "🔵"}
 

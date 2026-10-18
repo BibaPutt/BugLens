@@ -157,6 +157,24 @@ A `blocker` finding is a `failure` annotation, `major` is `warning`, and `minor`
 `neutral` otherwise. The bot never fails a build on its own. Full detail in
 [engine.md](engine.md#check-runs-and-annotations).
 
+### Per-lens caps
+
+`lens_caps` maps a lens name to the maximum number of comments it may contribute to the single
+review comment, so one noisy lens cannot consume the whole `max_comments` budget:
+
+```yaml
+lens_caps:
+  security: 3
+  ui: 2
+```
+
+It is opt-in and empty by default (`lens_caps: {}`), which means no per-lens cap. The global
+`max_comments` (default 12) always applies on top. A cap is clamped to a non-negative integer and
+a malformed entry is dropped. The highest-severity findings are kept first; a lens over its cap
+has its lowest-ranked findings dropped, and the footer names each capped lens as
+`lens caps: <lens> N`. Full detail in
+[engine.md](engine.md#code-objects-and-per-lens-caps).
+
 ## Supported languages
 
 Python, JavaScript, TypeScript, Java, Go, Rust, C, C++, C#, Ruby, PHP, Swift, Dart, Kotlin,

@@ -16,6 +16,7 @@ CONFIG_NAMES = (".buglens.yml", ".buglens.yaml", ".buglens.json", ".github/bugle
 
 DEFAULTS = {
     "max_comments": 12,
+    "lens_caps": {},
     "min_severity": "nit",
     "max_files": 25,
     "max_file_chars": 24000,
@@ -46,6 +47,7 @@ DEFAULTS = {
 @dataclass
 class Rules:
     max_comments: int = 12
+    lens_caps: dict[str, int] = field(default_factory=dict)
     min_severity: str = "nit"
     max_files: int = 25
     max_file_chars: int = 24000
@@ -187,6 +189,16 @@ def _to_rules(data: dict, source: str) -> Rules:
     r.linters = [str(x).strip().lower() for x in r.linters if str(x).strip()]
     if not isinstance(r.language_hints, dict):
         r.language_hints = {}
+    caps: dict[str, int] = {}
+    if isinstance(r.lens_caps, dict):
+        for name, value in r.lens_caps.items():
+            if not isinstance(name, str) or not name.strip() or isinstance(value, bool):
+                continue
+            try:
+                caps[name.strip()] = max(0, int(value))
+            except (TypeError, ValueError):
+                continue
+    r.lens_caps = caps
     if r.max_comments < 1:
         r.max_comments = 1
     if r.max_rounds < 0:
@@ -304,6 +316,7 @@ def describe(rules: Rules) -> dict:
     return {
         "source": rules.source,
         "max_comments": rules.max_comments,
+        "lens_caps": rules.lens_caps,
         "min_severity": rules.min_severity,
         "max_files": rules.max_files,
         "verify": rules.verify,

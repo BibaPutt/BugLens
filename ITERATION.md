@@ -114,6 +114,19 @@ read this, do one iteration from "Backlog", append to "Iteration log", commit.**
 | 20 | 2026-10-19 | **Wave D (W2)**: **symbol/contract graph + ripple analysis** (`symbols.py`): `changed_defs` reads added signature lines (py/js/go/method), `ripple` lists in-repo callers, `ripple_block` feeds lenses, `ripple_findings` flags a changed signature that now demands a required argument while callers exist; pipeline fetches up to 6 related bodies to index their refs | Beat-plan Wave D; Greptile/Macroscope sell "knows what else breaks" | 169 tests pass (`test_symbols` new) |
 | 21 | 2026-10-19 | **Wave E (W5)**: **learning+** (`learn.py` + `store` additions): feedback advisories injected into the prompt, per-lens demotion by reaction history, human-approved `.buglens.yml` candidates via `GET /api/v1/engine/learn`, verifier drop rationales persisted (`drops`, `GET /engine/stats`) | Beat-plan Wave E; closes the "learns what you don't care about" gap with local data only | 195 tests pass (`test_learn`, `test_store_learn`, `test_engine_learn` new) |
 | 22 | 2026-10-19 | **Wave F (W8-full)**: **check-run parity with annotations** (`checks.py` pure mapper; `github.create_check_run`/`update_check_run`/`find_check_run`; `check_run_input` / `check_run_grouping` / `check_run_max_annotations` keys): findings become check annotations (severity→level), chunked 50 per call, three output modes, one check by default or per-lens opt-in, `failure` only when `required_status_check` | Beat-plan Wave F; matches CodeRabbit/Greptile Checks UI; needs a GitHub App, fail-soft on a PAT | 224 tests pass (`test_checks`, `test_github_checks`, pipeline check-run tests new) |
+| 23 | 2026-10-19 | **Wave G (W9)**: **code-object lensing** (`objects.py` pure units; `sev.apply_lens_caps`; `lens_caps` key): findings are grouped by the symbol they change and tagged with it (`<file>` fallback), and an opt-in per-lens cap stops one noisy lens from consuming the whole comment budget | Beat-plan Wave G; sharper grouping and a precision lever that never blocks | 238 tests pass (`test_objects`; severity + pipeline tests new) |
+
+## Code objects and per-lens caps (iteration 23)
+The review already ran lenses per file; it now understands the symbols inside those files.
+
+- `objects.py` is a pure builder: `build_units` reuses `symbols.changed_defs` and assigns each added
+  line to the last definition at or before it, else `<file>`; units carry their line range and size.
+  `symbol_for` tags a kept finding with its unit; `unit_summary` renders the footer string.
+- `severity.apply_lens_caps(findings, caps)` keeps at most `caps[lens]` findings per lens in order
+  (an absent lens is uncapped), so the highest-ranked findings of a capped lens are the ones kept.
+- `lens_caps` is an opt-in `.buglens.yml` key (empty by default), clamped to `>= 0`, malformed
+  entries dropped; the global `max_comments` still applies first.
+- Footer: `code objects: N unit(s) across M file(s)` and `lens caps: <lens> N` per capped lens.
 
 ## Check runs and annotations (iteration 22)
 The optional check run was a single, annotation-free `neutral` check. It now carries the findings.

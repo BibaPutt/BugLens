@@ -855,3 +855,24 @@ async def test_convergence_reviews_new_code_only(monkeypatch, db):
     assert res.status != "converged"
     assert res.files == ["a.py"]
     assert any("no convergence" in n or "without convergence" in n for n in res.engine_notes)
+
+async def test_lens_caps_limit_comments_per_lens(monkeypatch, db):
+    monkeypatch.setattr(llm, "complete_json", _fake_llm)
+    _patch_github(monkeypatch, [{"filename": "a.py", "status": "modified", "patch": PATCH}])
+    rules = load_rules()
+    rules.lens_caps = {"security": 0}
+
+    res = await pipeline.review_pr("o", "r", 1, dry_run=True, db=db, rules=rules)
+
+    assert res.findings == []
+    assert any(n.startswith("lens caps: security") for n in res.engine_notes)
+
+
+async def test_code_objects_note_and_symbol_tagging(monkeypatch, db):
+    monkeypatch.setattr(llm, "complete_json", _fake_llm)
+    _patch_github(monkeypatch, [{"filename": "a.py", "status": "modified", "patch": PATCH}])
+
+    res = await pipeline.review_pr("o", "r", 1, dry_run=True, db=db)
+
+    assert any(n.startswith("code objects:") for n in res.engine_notes)
+    assert res.findings[0]["symbol"] == "<file>"

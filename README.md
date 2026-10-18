@@ -67,6 +67,8 @@ Point the extension at your own backend with the `buglens.apiUrl` setting.
 - **Findings in the Checks UI.** Opt-in check-run annotations surface every finding in the
   Checks tab and the Files changed diff. They need a GitHub App install and never block a
   merge by default.
+- **Symbol-aware and budgeted.** Findings are grouped by the symbol they change, and per-lens
+  caps stop one lens from dominating the review comment.
 
 Full detail: **[docs/engine.md](docs/engine.md)**.
 

@@ -242,6 +242,32 @@ adds the whole unified diff of the changed files, truncated at the output cap wi
 `check_run_conclusion` (default `neutral`) is used, and a stray `failure` falls back to `neutral`
 when `required_status_check` is false. The bot never fails a build on its own.
 
+## Code objects and per-lens caps
+
+**Code objects.** The engine groups each file's added lines by the symbol they belong to, using
+the same signature detection as ripple analysis. Every posted finding is tagged with its
+enclosing symbol, and the footer reports the depth as `code objects: N unit(s) across M file(s)`.
+A line that precedes any definition belongs to the file itself, tagged `<file>`. This is
+deterministic and costs no model call.
+
+**Per-lens caps.** A `lens_caps` key in `.buglens.yml` maps a lens name to the maximum number of
+comments it may contribute to the single review comment, so one noisy lens cannot consume the
+whole `max_comments` budget:
+
+```yaml
+lens_caps:
+  security: 3
+  ui: 2
+```
+
+It is opt-in and empty by default (`lens_caps: {}`), which means no per-lens cap; the global
+`max_comments` (default 12) always applies on top. A cap is clamped to a non-negative integer and
+a malformed entry is dropped. The highest-severity findings are kept first (the normal
+severity-then-confidence order); a lens over its cap has its lowest-ranked findings dropped, and
+the footer discloses each capped lens as `lens caps: <lens> N`. Both additions are deterministic
+and run offline. The key is documented in
+[configuration.md](configuration.md#per-lens-caps).
+
 ## Repo rules (`.buglens.yml`)
 
 Rules are read from the PR's **base branch**, so a PR cannot change how it is reviewed.

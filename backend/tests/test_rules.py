@@ -152,3 +152,24 @@ def test_round_knobs_load_and_validate():
 
     described = describe(defaults)
     assert described["max_rounds"] == 10 and described["converge_rounds"] == 3
+
+
+# ── Wave G: per-lens comment budget caps ──────────────────────────────────────
+def test_lens_caps_defaults_empty():
+    assert load_rules().lens_caps == {}
+
+
+def test_lens_caps_from_yaml():
+    r = load_rules({".buglens.yml": "lens_caps: {security: 3, ui: 2}\n"})
+    assert r.lens_caps == {"security": 3, "ui": 2}
+
+
+def test_lens_caps_validated():
+    r = load_rules({".buglens.yml": 'lens_caps: {security: -2, ui: "4", tests: true, 5: 3}\n'})
+    assert r.lens_caps == {"security": 0, "ui": 4}
+
+
+def test_describe_includes_lens_caps():
+    from buglens.rules import describe
+
+    assert "lens_caps" in describe(load_rules())
