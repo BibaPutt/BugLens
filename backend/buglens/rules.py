@@ -14,6 +14,9 @@ from dataclasses import dataclass, field
 
 CONFIG_NAMES = (".buglens.yml", ".buglens.yaml", ".buglens.json", ".github/buglens.yml", ".github/buglens.yaml")
 
+# Providers accepted in `external_context:` (kept local to avoid importing integrations).
+EXTERNAL_CONTEXT_PROVIDERS = ("jira", "linear", "sentry", "datadog", "posthog")
+
 DEFAULTS = {
     "max_comments": 12,
     "lens_caps": {},
@@ -41,6 +44,7 @@ DEFAULTS = {
     "request_changes": False,
     "max_rounds": 10,
     "converge_rounds": 3,
+    "external_context": [],
 }
 
 
@@ -75,6 +79,7 @@ class Rules:
     ignore_paths: list[str] = field(default_factory=list)
     focus: list[str] = field(default_factory=list)
     custom_rules: list[str] = field(default_factory=list)
+    external_context: list[str] = field(default_factory=list)   # [] off, else provider names
     language_hints: dict[str, str] = field(default_factory=dict)
     source: str = "defaults"
     raw: dict = field(default_factory=dict)
@@ -177,7 +182,7 @@ def _to_rules(data: dict, source: str) -> Rules:
             for k in known:
                 setattr(r, k, getattr(inner, k))
     # lists may arrive as comma strings from the subset parser
-    for listkey in ("ignore_paths", "focus", "custom_rules", "linters"):
+    for listkey in ("ignore_paths", "focus", "custom_rules", "linters", "external_context"):
         v = getattr(r, listkey)
         if isinstance(v, str):
             setattr(r, listkey, [p.strip() for p in v.split(",") if p.strip()])
@@ -187,6 +192,12 @@ def _to_rules(data: dict, source: str) -> Rules:
         elif isinstance(v, list):
             setattr(r, listkey, [_coerce(x) for x in v])
     r.linters = [str(x).strip().lower() for x in r.linters if str(x).strip()]
+    seen_providers: list[str] = []
+    for x in (r.external_context if isinstance(r.external_context, list) else []):
+        name = str(x).strip().lower()
+        if name and name in EXTERNAL_CONTEXT_PROVIDERS and name not in seen_providers:
+            seen_providers.append(name)
+    r.external_context = seen_providers
     if not isinstance(r.language_hints, dict):
         r.language_hints = {}
     caps: dict[str, int] = {}
@@ -339,4 +350,5 @@ def describe(rules: Rules) -> dict:
         "ignore_paths": rules.ignore_paths,
         "focus": rules.focus,
         "custom_rules": rules.custom_rules,
+        "external_context": rules.external_context,
     }

@@ -876,3 +876,42 @@ async def test_code_objects_note_and_symbol_tagging(monkeypatch, db):
 
     assert any(n.startswith("code objects:") for n in res.engine_notes)
     assert res.findings[0]["symbol"] == "<file>"
+
+async def test_external_context_surfaces_and_is_disclosed(monkeypatch, db):
+    from buglens import integrations
+
+    monkeypatch.setattr(llm, "complete_json", _fake_llm)
+    _patch_github(monkeypatch, [{"filename": "a.py", "status": "modified", "patch": PATCH}])
+
+    async def fake_collect(providers, repo, query=""):
+        return {"tickets": ["eval is unsafe"], "signals": [
+            {"source": "sentry", "title": "boom", "count": 3, "url": "u"}],
+            "used": ["jira", "sentry"]}
+
+    monkeypatch.setattr(integrations, "collect", fake_collect)
+    rules = load_rules()
+    rules.external_context = ["jira", "sentry"]
+
+    res = await pipeline.review_pr("o", "r", 1, dry_run=True, db=db, rules=rules)
+
+    assert any(n == "external context: jira, sentry" for n in res.engine_notes)
+    assert [f["title"] for f in res.findings] == ["eval on user input"]
+
+
+async def test_external_context_failure_is_swallowed(monkeypatch, db):
+    from buglens import integrations
+
+    monkeypatch.setattr(llm, "complete_json", _fake_llm)
+    _patch_github(monkeypatch, [{"filename": "a.py", "status": "modified", "patch": PATCH}])
+
+    async def boom(providers, repo, query=""):
+        raise RuntimeError("no network")
+
+    monkeypatch.setattr(integrations, "collect", boom)
+    rules = load_rules()
+    rules.external_context = ["sentry"]
+
+    res = await pipeline.review_pr("o", "r", 1, dry_run=True, db=db, rules=rules)
+
+    assert res.status == "dry-run"
+    assert not any("external context" in n for n in res.engine_notes)

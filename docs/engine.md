@@ -268,6 +268,18 @@ the footer discloses each capped lens as `lens caps: <lens> N`. Both additions a
 and run offline. The key is documented in
 [configuration.md](configuration.md#per-lens-caps).
 
+## External context
+
+The engine can fold in outside material about the change: ticket text (Jira, Linear) and
+production error signals (Sentry, Datadog, PostHog). Ticket text is matched against the changed
+symbols (see **Code objects** above), so the prompt can tie a reported issue to the symbols it
+touches rather than treating it as free-floating prose.
+
+The providers are listed under `external_context:` and each reads its own environment variables
+(see [configuration.md](configuration.md#external-context)). It is **off by default**, adds no
+required service, and is fail-soft: a missing token or a failed call is skipped and never fails
+the review.
+
 ## Repo rules (`.buglens.yml`)
 
 Rules are read from the PR's **base branch**, so a PR cannot change how it is reviewed.

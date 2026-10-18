@@ -45,6 +45,8 @@ user says **"final"**. Never print or commit the token.
 | `learn.py` | pure, deterministic learning+: `lens_ranking` (demote down-voted lenses), `order_lenses`, `learn_block` (bounded feedback advisory for prompts), `candidate_rules` (human-approved `.buglens.yml` snippets, never auto-applied) |
 | `checks.py` | pure finding→check-run mapping: `annotation_level`, `finding_to_annotation`, `annotations_from_findings` (cap + ordering), `annotation_chunks` (50/call), `conclusion_for`, `input_text` (three modes) |
 | `recall.py` | prior-review/prior-PR recall: past findings by path (+ outcomes), dismissals, `file_prs` history, bounded recall block |
+| `prodcontext.py` | pure ticket↔symbol linking: `map_symbols` (whole-word match of changed symbols in ticket text), `ticket_block` (bounded block), `signals_block` (bounded external-signal block) |
+| `integrations.py` | optional self-hosted external context: `configured` (env gate), `collect` (Jira/Linear ticket text + Sentry/Datadog/PostHog signals), fail-soft, off by default, own `_http()` pool closed in lifespan |
 | `objects.py` | pure code-object units: `build_units` (group a file's added lines by enclosing changed symbol, `<file>` fallback), `symbol_for` (tag a finding with its unit), `unit_summary` (footer string) |
 | `walkthrough.py` | deterministic Change-Stack grouping: classify changed files into ordered chapters (schema→models→logic→api→ui→config→tests→docs), per-chapter notes; no model |
 | `chat.py` | threaded `@buglens` commands: `parse_command` routing, `answer` (deterministic Change-Stack for `explain`, one bounded `complete_text` for `why`/`ask`), `handoff_prompts` Fix-All, `handle_command` posts an in-thread reply |
@@ -84,7 +86,10 @@ Wiring: `routers/webhook.py` → `pipeline.review_pr`; `routers/review.py` → `
       check-run parity: opt-in annotated check runs (severity→level map, 50-per-call chunking,
       `check_run_input` modes, `check_run_grouping`, never blocking by default; needs a GitHub App);
       iteration 23 (Wave G) = code-object lensing: findings grouped by their enclosing changed
-      symbol (`objects.py`, `<file>` fallback) and opt-in per-lens comment caps (`lens_caps`).
+      symbol (`objects.py`, `<file>` fallback) and opt-in per-lens comment caps (`lens_caps`);
+      iteration 24 (Wave H) = external context: ticket text mapped to changed symbols
+      (`prodcontext.py`) plus optional self-hosted production signals (`integrations.py`,
+      Jira/Linear/Sentry/Datadog/PostHog, off by default, fail-soft).
       **Full plan:
       `../temp/intel/buglens-v2-beat-plan-2026-10.md` (Waves A–J).** Inline reply chat shipped;
       multi-model consensus (second model) still open)*
@@ -167,6 +172,24 @@ identity. `POST /api/v1/feedback` and `/engine/stats?repo=` expect `owner/repo`.
   whole hunk + the `pr_round_files` ledger (`first_round<round_no`); keep it deterministic.
 - The round-cap note uses its own marker (`pipeline.MARKER_CAP`); the convergence note reuses
   `MARKER` (it *is* the current review).
+
+## External context (iteration 24, do not regress)
+- **`prodcontext.py` is pure.** `map_symbols` uses ASCII word-boundary matching (`(?<![A-Za-z0-9_])`,
+  `(?![A-Za-z0-9_])`), never bare `in`; it skips the `<file>` pseudo-symbol; output is ordered by
+  first occurrence in the text, capped at `MAX_SYMBOLS`. No model, no I/O.
+- **`integrations.py` is optional and off by default.** `rules.external_context` (empty default) lists
+  providers; a missing env var makes `configured` False and the provider is skipped. Every call and
+  parse is wrapped: a failure contributes nothing and never fails the review. No new required
+  service. Its HTTP client is a module-level lazy pool (`_http()`) closed via `integrations.aclose()`
+  in `main` lifespan. **Never log a token or an auth header.**
+- **Providers and env.** ticket: `jira` (`JIRA_BASE_URL`/`JIRA_EMAIL`/`JIRA_TOKEN`), `linear`
+  (`LINEAR_API_KEY`); signals: `sentry` (`SENTRY_TOKEN`/`SENTRY_ORG`/optional `SENTRY_PROJECT`/
+  optional `SENTRY_BASE_URL`), `datadog` (`DD_API_KEY`/`DD_APP_KEY`/optional `DD_SITE`), `posthog`
+  (`POSTHOG_API_KEY`/`POSTHOG_PROJECT_ID`/optional `POSTHOG_BASE_URL`). `collect` returns
+  `{"tickets": [str], "signals": [dict], "used": [str]}`; `used` names only providers that contributed.
+- **Both blocks are bounded and opt-in.** The pipeline appends the ticket-symbol block and the
+  signals block to the prompt context only when they are non-empty, and names the contributing
+  providers in the footer: `external context: <providers>` (iteration-16 rule).
 
 ## Code objects and per-lens caps (iteration 23, do not regress)
 - **`objects.py` is pure and deterministic.** `build_units` reuses `symbols.changed_defs` (it does

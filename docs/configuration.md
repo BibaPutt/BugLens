@@ -175,6 +175,33 @@ has its lowest-ranked findings dropped, and the footer names each capped lens as
 `lens caps: <lens> N`. Full detail in
 [engine.md](engine.md#code-objects-and-per-lens-caps).
 
+### External context
+
+`external_context` pulls optional outside material into the review: ticket bodies (Jira, Linear)
+and production error signals (Sentry, Datadog, PostHog). It is **optional and off by default**;
+list the providers you want in `.buglens.yml`:
+
+```yaml
+external_context:
+  - jira
+  - sentry
+```
+
+Accepted names are `jira`, `linear`, `sentry`, `datadog` and `posthog`; any other name is
+dropped, duplicates are removed and order is preserved. Each provider reads its own
+environment variables, so enable one only when those are set:
+
+| Provider | Variables |
+|---|---|
+| `jira` | `JIRA_BASE_URL`, `JIRA_EMAIL`, `JIRA_TOKEN` |
+| `linear` | `LINEAR_API_KEY` |
+| `sentry` | `SENTRY_TOKEN`, `SENTRY_ORG`, `SENTRY_PROJECT` (optional), `SENTRY_BASE_URL` (optional, self-hosted) |
+| `datadog` | `DD_API_KEY`, `DD_APP_KEY`, `DD_SITE` (optional) |
+| `posthog` | `POSTHOG_API_KEY`, `POSTHOG_PROJECT_ID`, `POSTHOG_BASE_URL` (optional, self-hosted) |
+
+It adds no required service. A missing token is a silent no-op, and a failed call is skipped
+without ever failing the review. Tokens are read from the environment only and are never logged.
+
 ## Supported languages
 
 Python, JavaScript, TypeScript, Java, Go, Rust, C, C++, C#, Ruby, PHP, Swift, Dart, Kotlin,

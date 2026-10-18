@@ -173,3 +173,24 @@ def test_describe_includes_lens_caps():
     from buglens.rules import describe
 
     assert "lens_caps" in describe(load_rules())
+
+
+# ── Wave H: optional external context providers ───────────────────────────────
+def test_external_context_defaults_empty():
+    assert load_rules().external_context == []
+
+
+def test_external_context_from_yaml():
+    r = load_rules({".buglens.yml": 'external_context: [jira, " Sentry ", bogus]\n'})
+    assert r.external_context == ["jira", "sentry"]
+
+
+def test_external_context_accepts_a_single_string():
+    r = load_rules({".buglens.yml": "external_context: linear\n"})
+    assert r.external_context == ["linear"]
+
+
+def test_describe_includes_external_context():
+    from buglens.rules import describe
+
+    assert "external_context" in describe(load_rules())

@@ -14,7 +14,7 @@ from slowapi import Limiter, _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
 from slowapi.util import get_remote_address
 
-from buglens import github, llm, pipeline, store
+from buglens import github, integrations, llm, pipeline, store
 from core.config import is_production, validate_config
 from core.security import get_trusted_client_ip
 from middleware.ip_tracking import IPTrackingMiddleware
@@ -42,6 +42,7 @@ async def lifespan(app: FastAPI):
         await sweeper
     await llm.aclose()               # close the shared HTTP pools cleanly
     await github.aclose()
+    await integrations.aclose()
     await store.close_pool()         # aiosqlite worker threads are non-daemon
 
 

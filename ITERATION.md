@@ -115,6 +115,22 @@ read this, do one iteration from "Backlog", append to "Iteration log", commit.**
 | 21 | 2026-10-19 | **Wave E (W5)**: **learning+** (`learn.py` + `store` additions): feedback advisories injected into the prompt, per-lens demotion by reaction history, human-approved `.buglens.yml` candidates via `GET /api/v1/engine/learn`, verifier drop rationales persisted (`drops`, `GET /engine/stats`) | Beat-plan Wave E; closes the "learns what you don't care about" gap with local data only | 195 tests pass (`test_learn`, `test_store_learn`, `test_engine_learn` new) |
 | 22 | 2026-10-19 | **Wave F (W8-full)**: **check-run parity with annotations** (`checks.py` pure mapper; `github.create_check_run`/`update_check_run`/`find_check_run`; `check_run_input` / `check_run_grouping` / `check_run_max_annotations` keys): findings become check annotations (severity→level), chunked 50 per call, three output modes, one check by default or per-lens opt-in, `failure` only when `required_status_check` | Beat-plan Wave F; matches CodeRabbit/Greptile Checks UI; needs a GitHub App, fail-soft on a PAT | 224 tests pass (`test_checks`, `test_github_checks`, pipeline check-run tests new) |
 | 23 | 2026-10-19 | **Wave G (W9)**: **code-object lensing** (`objects.py` pure units; `sev.apply_lens_caps`; `lens_caps` key): findings are grouped by the symbol they change and tagged with it (`<file>` fallback), and an opt-in per-lens cap stops one noisy lens from consuming the whole comment budget | Beat-plan Wave G; sharper grouping and a precision lever that never blocks | 238 tests pass (`test_objects`; severity + pipeline tests new) |
+| 24 | 2026-10-19 | **Wave H (W10)**: **ticket + production context** (`prodcontext.py` pure link/render; `integrations.py` optional self-hosted fetchers; `external_context` key): linked ticket text is matched to the changed symbols and optional Jira/Linear tickets plus Sentry/Datadog/PostHog signals join the prompt | Beat-plan Wave H; ties an issue to the code it touches; off by default, fail-soft, no new service | 271 tests pass (`test_prodcontext`, `test_integrations` new) |
+
+## External context (iteration 24)
+Ticket text now points at the code, and optional production signals can join the review.
+
+- `prodcontext.py` is pure: `map_symbols` finds changed symbols named in ticket text with ASCII
+  word boundaries (so `run` never matches `running`), ordered by first mention; `ticket_block` and
+  `signals_block` render bounded markdown blocks.
+- `integrations.py` is optional and off by default: `external_context` lists providers, a missing
+  token skips the provider, and every call and parse is wrapped so a failure contributes nothing.
+  It reuses one lazy HTTP pool (`integrations.aclose()` runs in the app lifespan) and never logs a
+  token.
+- Providers: tickets from `jira`/`linear`, signals from `sentry`/`datadog`/`posthog`; env vars are
+  in `docs/configuration.md` and `backend/.env.example`.
+- The pipeline appends both blocks only when non-empty and names contributing providers in the
+  footer: `external context: <providers>`.
 
 ## Code objects and per-lens caps (iteration 23)
 The review already ran lenses per file; it now understands the symbols inside those files.

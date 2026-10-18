@@ -22,7 +22,7 @@ import uuid
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 
-from . import adapters, checks, github, indexer, learn, llm, objects, prompts, recall, secretscan, store, symbols, tickets, verify, walkthrough
+from . import adapters, checks, github, indexer, integrations, learn, llm, objects, prodcontext, prompts, recall, secretscan, store, symbols, tickets, verify, walkthrough
 from . import lenses as L
 from .context import build_context, extract_symbols, language_of
 from .diff import FileDiff, DiffLine, ADD, choose_paths, parse_patch
@@ -986,6 +986,26 @@ async def _review_pr(owner: str, repo: str, pr_number: int, *, base_sha: str | N
         except Exception:
             learn_scopes, demoted = [], set()
 
+    units = objects.build_units(picked)
+    prod_used: list = []
+    if rules.external_context:
+        try:
+            ext = await integrations.collect(rules.external_context, slug, ticket_block[:2000])
+        except Exception:
+            ext = {"tickets": [], "signals": [], "used": []}
+        parts: list = []
+        ext_tickets = ext.get("tickets") or []
+        if ext_tickets:
+            mapped = prodcontext.ticket_block(" ".join(str(t) for t in ext_tickets), units)
+            if mapped:
+                parts.append(mapped)
+        signals = prodcontext.signals_block(ext.get("signals") or [])
+        if signals:
+            parts.append(signals)
+        if parts:
+            context_block = (context_block + "\n\n" + "\n".join(parts))[:13000]
+            prod_used = [str(p) for p in (ext.get("used") or [])]
+
     sem = asyncio.Semaphore(CONCURRENCY)
     all_findings: list[dict] = []
     positives: list[str] = []
@@ -1081,7 +1101,6 @@ async def _review_pr(owner: str, repo: str, pr_number: int, *, base_sha: str | N
     for f in capped:
         lens = str(f.get("lens") or "unknown")
         cap_counts[lens] = cap_counts.get(lens, 0) + 1
-    units = objects.build_units(picked)
     for f in kept:
         f["symbol"] = objects.symbol_for(f.get("path"), f.get("line"), units)
 
@@ -1146,6 +1165,8 @@ async def _review_pr(owner: str, repo: str, pr_number: int, *, base_sha: str | N
         res.engine_notes.append(f"code objects: {obj_note}")
     for lens in sorted(cap_counts):
         res.engine_notes.append(f"lens caps: {lens} {cap_counts[lens]}")
+    if prod_used:
+        res.engine_notes.append(f"external context: {', '.join(sorted(set(prod_used)))}")
 
     if db:                                 # ledger of what this round actually reviewed
         try:
