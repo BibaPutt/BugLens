@@ -17,11 +17,11 @@ what it already told you.
 
 Three surfaces, one review engine:
 
-- **VS Code extension** — `Ctrl+Shift+R` reviews the current file or selection, with inline
+- **VS Code extension**: `Ctrl+Shift+R` reviews the current file or selection, with inline
   highlights and hover fixes.
-- **GitHub PR bot** — reviews every pull request, posts one consolidated review with
+- **GitHub PR bot**: reviews every pull request, posts one consolidated review with
   apply-in-one-click suggestion blocks. It never blocks a PR.
-- **Dashboard + API** — `/api/v1/review`, history, and engine stats.
+- **Dashboard + API**: `/api/v1/review`, history, and engine stats.
 
 ## Install
 
@@ -47,7 +47,7 @@ Point the extension at your own backend with the `buglens.apiUrl` setting.
 - **Diff-native.** Every finding is anchored to an added line and quoted with evidence. No
   line, no finding.
 - **Two-gate verification.** A machine gate (line exists in the diff, evidence actually
-  present) plus a bounded model gate. Deterministic hits — secrets — bypass both.
+  present) plus a bounded model gate. Deterministic hits (secrets) skip both gates.
 - **One review per PR.** Never a comment storm; pushes don't duplicate comments.
 - **Learns.** 👍/👎 reactions suppress repeated noise and promote patterns into future
   prompts. On merge it checks whether each finding was actually fixed.
@@ -67,7 +67,7 @@ Repo → **Settings → Webhooks → Add webhook**:
 | Secret | the same string as `GITHUB_WEBHOOK_SECRET` |
 | Events | **Pull requests** only |
 
-Host it yourself with SQLite — no Redis, no queue, no vector DB required. See
+Host it yourself with SQLite: no Redis, no queue, no vector DB required. See
 [docs/configuration.md](docs/configuration.md).
 
 ## Docs

@@ -2,14 +2,14 @@
 
 Greptile/CodeRabbit build a repo-wide graph of files, functions/classes, imports and
 references, then pull callers, tests and neighbours into a review. We do the same with
-the standard library only — no tree-sitter, no vector DB, no external indexer:
+the standard library only, no tree-sitter, no vector DB, no external indexer:
 
-* ``parse_text(path, text)`` — one file → ``{defs, imports, refs, doc, tests}``.
+* ``parse_text(path, text)``, one file → ``{defs, imports, refs, doc, tests}``.
   Python goes through ``ast`` (accurate); everything else through a conservative regex
   fallback that still finds defs/classes/imports in JS/TS/Go/Rust/Java-likes.
-* ``index_files(repo, files, db)`` — incremental: a file is re-parsed only when its
+* ``index_files(repo, files, db)``, incremental: a file is re-parsed only when its
   content hash changed; stale rows are pruned.
-* ``related_files(repo, changed, db)`` — the retrieval step: import-graph neighbours
+* ``related_files(repo, changed, db)``, the retrieval step: import-graph neighbours
   (both directions), files that reference the changed symbols, and their tests, ranked by
   a cheap personalized-PageRank over the import graph (Aider's trick, without embeddings).
 
@@ -192,7 +192,7 @@ def _imports_from(record: dict) -> set[str]:
 def _module_maps(index: dict[str, dict]) -> tuple[dict, dict, dict]:
     """Build module lookups once instead of rescanning every module for every import.
 
-    The old ``build_graph`` was O(paths x imports x modules x paths) — 9.4s on a 2000-file
+    The old ``build_graph`` was O(paths x imports x modules x paths), 9.4s on a 2000-file
     repo, on every review. These three maps make resolution a dict lookup:
       exact  : "a.b.c"     -> paths
       suffix : "b.c"/"c"   -> paths   (covers ``cand.endswith("." + mod)``)

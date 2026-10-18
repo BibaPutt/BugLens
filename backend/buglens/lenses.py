@@ -2,7 +2,7 @@
 
 v1 asked one generic prompt for "issues". A PR that merges a security fix, a
 frontend tweak and a broken API contract deserves a security engineer, a UI
-reviewer and a merge gate — not one generalist. Each lens here is an expert
+reviewer and a merge gate, not one generalist. Each lens here is an expert
 persona with its own focus text, its own comment floor and its own file scope.
 
 Adding a lens is a data change, not a code change: append to LENSES and the
@@ -111,7 +111,7 @@ def select_lenses(path: str, language: str, focus: list[str] | None = None,
 
     `focus` (from .buglens.yml) is an allow-list; when present only those lenses run.
     Otherwise the defaults run, plus any lens whose scope (exts/langs) matches the
-    file — that is how the UI lens turns on for frontend files and how a repo's
+    file, that is how the UI lens turns on for frontend files and how a repo's
     custom lens (`.buglens/lenses/*.md`) turns on for its own file types.
 
     `pool` lets the caller add repo-defined lenses on top of the built-ins.

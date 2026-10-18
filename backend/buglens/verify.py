@@ -2,11 +2,11 @@
 
 Two stages, cheapest first:
 
-1. **Machine gate** (free, deterministic) — is the finding's quoted evidence
+1. **Machine gate** (free, deterministic), is the finding's quoted evidence
    actually present in the added lines? Is its line a real added line? If not, it
    is a hallucination or a stale line and is dropped. This is the single highest
    value check in the whole pipeline.
-2. **Model gate** (one strict adversarial call per surviving finding) — a second,
+2. **Model gate** (one strict adversarial call per surviving finding), a second,
    cheaper opinion that defaults to "drop" when the evidence does not prove the
    claim. Bounded by ``rules.verify_top_n`` so big PRs stay affordable.
 """
@@ -152,7 +152,7 @@ async def verify_all(findings: list[dict], files_by_path: dict[str, FileDiff], r
             continue
         to_gate.append(finding)
 
-    # Gate concurrently (bounded) — serially this added a full round-trip per finding.
+    # Gate concurrently (bounded), serially this added a full round-trip per finding.
     if to_gate:
         gates = asyncio.Semaphore(VERIFY_CONCURRENCY)
 

@@ -152,14 +152,14 @@ def build_review_prompt(
     lang_rules = rules.language_hints.get(fd.language, "")
 
     parts = [
-        f"LENS: {lens.name} — {lens.focus}",
+        f"LENS: {lens.name} | {lens.focus}",
         f"FILE: {fd.path}  ({fd.language}, {fd.status})",
         f"Report findings with category \"{lens.category}\" unless another fits better.",
         f"Minimum confidence to include: {max(lens.default_min_confidence, 0.0):.2f}",
         "",
     ]
     if rules.custom_rules:
-        parts.append("TEAM RULES (from the repository's .buglens.yml — authoritative):")
+        parts.append("TEAM RULES (from the repository's .buglens.yml, authoritative):")
         for r in rules.custom_rules:
             parts.append(f"- {r}")
         parts.append("")
@@ -167,7 +167,7 @@ def build_review_prompt(
         parts.append(f"Focus areas requested by the repo: {', '.join(rules.focus)}")
         parts.append("")
     if prior_good:
-        parts.append("This team has previously confirmed these as GOOD practice — do not flag them:")
+        parts.append("This team has previously confirmed these as GOOD practice, do not flag them:")
         for g in prior_good[:8]:
             parts.append(f"- {g}")
         parts.append("")

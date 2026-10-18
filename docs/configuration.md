@@ -7,7 +7,7 @@ development except the LLM and GitHub credentials.
 
 ### LLM (provider-agnostic, OpenAI-compatible)
 
-Anything that speaks `POST /chat/completions` works — Groq, OpenAI, Together, a local
+Anything that speaks `POST /chat/completions` works: Groq, OpenAI, Together, a local
 server.
 
 | Variable | Notes |
@@ -56,7 +56,7 @@ a placeholder key.
 | `BUGLENS_FETCH_CONCURRENCY` | `8` | concurrent GitHub file fetches per review |
 | `BUGLENS_STALE_RUN_MIN` | `30` | minutes before an unfinished run may be retried |
 | `BUGLENS_SWEEP_HOURS` | `24` | interval between cache/index sweeps |
-| `BUGLENS_COST_PER_1M_IN` | unset | $ per 1M input tokens — enables the cost figure in the review footer |
+| `BUGLENS_COST_PER_1M_IN` | unset | $ per 1M input tokens; enables the cost figure in the review footer |
 | `BUGLENS_COST_PER_1M_OUT` | unset | $ per 1M output tokens (used with the above) |
 
 The footer always reports engine calls, failed calls, tokens (when the provider returns them)
@@ -87,7 +87,7 @@ Open Settings (`Ctrl+,`) and search **buglens**.
 | `buglens.showInlineHighlights` | `true` | Coloured underlines on problem lines |
 
 The extension identifies itself with a key compiled into the bundle. That is deliberately not
-a strong secret — it stops casual scripted abuse, not a determined attacker — so on a
+a strong secret (it stops casual scripted abuse, not a determined attacker), so on a
 self-hosted instance set `EXTENSION_SHARED_SECRET` only if you also rebuild the extension with
 a matching key, or leave it unset.
 
@@ -98,7 +98,7 @@ a matching key, or leave it unset.
 
 Two keys govern the re-review loop: `max_rounds` (default `10`) stops the bot on a PR that has
 been reviewed that many times, and `converge_rounds` (default `3`) switches to *new-code-only*
-reviews after that many rounds (deterministic — a file is only re-reviewed if its diff actually
+reviews after that many rounds (deterministic: a file is only re-reviewed if its diff actually
 changed). Set either to `0` to disable it.
 
 ## Supported languages

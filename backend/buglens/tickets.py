@@ -39,7 +39,7 @@ def strip_noise(text: str) -> str:
 def parse_closing_refs(text: str) -> list[dict]:
     """Linked issues from free text. Returns [{repo(optional), number}] de-duplicated.
 
-    Used only as a fallback/enrichment — the authoritative source is GraphQL
+    Used only as a fallback/enrichment, the authoritative source is GraphQL
     ``closingIssuesReferences`` (which respects the default-branch rule).
     """
     clean = strip_noise(text)
@@ -92,7 +92,7 @@ def format_ticket(issues: list[dict], criteria: dict[int, list[str]] | None = No
     parts = ["## Linked ticket(s) (authoritative intent for this change)"]
     for issue in issues[:3]:
         label = f"{issue.get('repo', '')}#{issue.get('number')}".strip("#")
-        parts.append(f"### {label} — {issue.get('title', '').strip()}")
+        parts.append(f"### {label}, {issue.get('title', '').strip()}")
         items = criteria.get(issue.get("number"), [])[:8]
         body = (issue.get("body") or "").strip()
         if items:                                    # criteria are re-emitted as a clean list

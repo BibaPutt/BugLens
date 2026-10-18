@@ -2,7 +2,7 @@
 
 This page is deliberately quantitative. Numbers are from `backend/bench.py`'s workloads
 (synthetic repo, SQLite on Windows, single process) and exist to show where the ceilings
-are — not to promise production throughput.
+are, not to promise production throughput.
 
 ## The model
 
@@ -11,8 +11,8 @@ Single FastAPI process. The webhook verifies the signature, dedupes the delivery
 
 Two independent limits apply:
 
-- **Per review** — `CONCURRENCY = 4` bounds file×lens fan-out inside one review.
-- **Per process** — `BUGLENS_MAX_CONCURRENT_REVIEWS` (default `8`) bounds how many reviews
+- **Per review**: `CONCURRENCY = 4` bounds file×lens fan-out inside one review.
+- **Per process**: `BUGLENS_MAX_CONCURRENT_REVIEWS` (default `8`) bounds how many reviews
   run at once. Callers above the limit wait rather than spawning work, and reviews of the
   same repo take a per-repo lock so ten pushes to one repo cannot stampede the LLM.
 
@@ -49,8 +49,8 @@ The graph number was a genuine algorithmic defect: import resolution rescanned e
 for every import, which is quadratic in repo size. It is now a dictionary lookup, and a
 regression test asserts the fast path resolves imports identically to the old algorithm.
 
-Parsing is linear and only ever touches **changed** files — unchanged files are skipped by
-content hash — so the per-review cost does not grow with repo size once indexed.
+Parsing is linear and only ever touches **changed** files (unchanged files are skipped by
+content hash), so the per-review cost does not grow with repo size once indexed.
 
 `BUGLENS_SQLITE_POOL` is the one knob that matters if you see store contention. Raising it
 helps reads; writes are serialized by SQLite itself regardless.
@@ -65,7 +65,7 @@ helps reads; writes are serialized by SQLite itself regardless.
 | LLM / GitHub transport | – | – | one shared keep-alive pool per service, not a client per call |
 
 A sweep runs in-process every `BUGLENS_SWEEP_HOURS` (default 24h) to expire file-cache rows
-and drop index history for repos untouched for 30 days — neither table grows without bound.
+and drop index history for repos untouched for 30 days, so neither table grows without bound.
 
 Redis is **optional**. With `REDIS_URL` set, rate limits and budgets are shared across
 processes; without it they are per-process, which is correct for a single-instance deploy.
@@ -82,7 +82,7 @@ processes; without it they are per-process, which is correct for a single-instan
    concurrently, so a review with 8 findings costs about one gate round-trip, not eight.
 4. **Process count.** This is intentionally a single-process design. Running multiple
    workers against one SQLite file is safe (WAL + timeout) but the review admission limit is
-   then *per worker* — run one worker, or set `REDIS_URL` so limits are shared.
+   then *per worker*: run one worker, or set `REDIS_URL` so limits are shared.
 
 ## Failure behaviour
 
@@ -107,10 +107,10 @@ processes; without it they are per-process, which is correct for a single-instan
 
 | Symptom | Likely cause |
 |---|---|
-| `503` on `/engine/stats` | `ADMIN_API_KEY` not set — expected |
+| `503` on `/engine/stats` | `ADMIN_API_KEY` not set (expected) |
 | Reviews never post | `GITHUB_TOKEN` missing or lacking `repo` scope |
 | Webhook `401`s | secret mismatch between GitHub and `GITHUB_WEBHOOK_SECRET` |
 | `no such table: runs` | the app was started without its lifespan running (engine store never initialised) |
 | First request slow | free-tier hosts sleep; the first request wakes the instance |
 | Comment volume too high | lower `max_comments`, raise `min_severity`, or set `skip_nits: true` |
-| A finding keeps appearing after fixes | reaction feedback never reached the server — check the webhook receives `reaction` events |
+| A finding keeps appearing after fixes | reaction feedback never reached the server. Check the webhook receives `reaction` events |

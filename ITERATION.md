@@ -1,4 +1,4 @@
-# ITERATION.md — the continuous improvement loop
+# ITERATION.md: the continuous improvement loop
 
 BugLens gets better by reading the field, copying what works, and letting its own
 users tell it what to stop saying. This file is the loop's memory. **Every session:
@@ -12,13 +12,13 @@ read this, do one iteration from "Backlog", append to "Iteration log", commit.**
      as confirmed-good practice (`store.confirmed_good`).
    - Dashboard → `GET /api/v1/engine` (lenses + effective rules) and
      `GET /api/v1/engine/stats` (runs / findings / outcomes).
-2. **Signals out** — every PR push preserves `dropped` findings with a `drop_reason`
+2. **Signals out**: every PR push preserves `dropped` findings with a `drop_reason`
    (`machine:` / `model:` / `suppressed`). Treat a spike in `model:` drops as a prompt bug.
-3. **Field scan** — read the competitor intel (`../temp/intel/`) and the cloned OSS bots
+3. **Field scan**: read the competitor intel (`../temp/intel/`) and the cloned OSS bots
    (`../temp/pr-review-bots/`), plus a fresh web search, and write new gaps below.
-4. **One iteration** — pick the top backlog item, implement it in `backend/buglens/`
+4. **One iteration**: pick the top backlog item, implement it in `backend/buglens/`
    (or the extension/dashboard), add a test, run `pytest`, run `npm run compile`.
-5. **Record** — append a row to the log, tick the backlog item, commit locally.
+5. **Record**: append a row to the log, tick the backlog item, commit locally.
 
 ## Non-negotiables carried into every iteration
 - Never block a PR (`event=COMMENT`), one consolidated review, evidence-gated comments.
@@ -33,20 +33,20 @@ read this, do one iteration from "Backlog", append to "Iteration log", commit.**
    keyed by (added lines + rules + lenses); identical diffs within 7 days reuse the lens
    verdict and skip the LLM. `store.get_file_cache` / `put_file_cache`.
 3. ~~**Per-language verify gates.**~~ **Shipped (iteration 8):** deterministic secret
-   scanner (`buglens/secretscan.py`) — regex hits are ground truth, skip the model gate,
+   scanner (`buglens/secretscan.py`): regex hits are ground truth, skip the model gate,
    post as `blocker`, values masked. First of the "scanners layer"; more rules can follow.
 4. **Token/policy budget with early stop** on huge PRs (dwakshar ai-pr-review-bot does a
-   hard token gate; we do a file gate — add a char budget too). *Shipped: `max_file_chars`
+   hard token gate; we do a file gate: add a char budget too). *Shipped: `max_file_chars`
    now actually gates oversized files (it was dead config); they appear under "Files skipped".*
 5. **Walkthrough comment** (CodeRabbit-style change-by-change summary) as the PR body
    when `summary_only: true`. *Shipped: `summary_only` now truly posts summary-only
-   (no inline comments) — the flag existed but was never read.*
+   (no inline comments): the flag existed but was never read.*
 6. **Multi-model consensus** for high-severity findings only (cheap second model; drop
-   if they disagree) — optional, off by default. *Multi-pass consensus (shuffled diffs +
+   if they disagree): optional, off by default. *Multi-pass consensus (shuffled diffs +
    majority vote, `consensus:` rule) shipped in iteration 3; a second model is still open.*
 7. **`REQUEST_CHANGES` opt-in** via `.buglens.yml` for teams that want a hard gate
    (still never the default).
-8. **Inline reply chat** — reply to a thread on a BugLens comment (like the Gitea bot's
+8. **Inline reply chat**: reply to a thread on a BugLens comment (like the Gitea bot's
    conversational mode) using the file context we already fetched.
 9. ~~**Ticket-aware review.**~~ **Shipped (iteration 9):** the issues a PR closes are read
    (GraphQL `closingIssuesReferences`, keyword fallback), acceptance criteria are extracted,
@@ -67,7 +67,7 @@ read this, do one iteration from "Backlog", append to "Iteration log", commit.**
 15. ~~**Re-review round cap + convergence discipline**~~ **Shipped (iteration 16):** see below.
 16. **Comment-location verification gate (position drift).** Every inline finding must resolve
     to a real hunk in the *current* revision; a stale anchor (force-push, retarget) re-anchors
-    to ±3 changed lines or downgrades to summary level — never a wrong-line inline comment.
+    to ±3 changed lines or downgrades to summary level, never a wrong-line inline comment.
     Pure-deterministic, no LLM. *Learning-wave #11.*
 17. **Pre-mortem section + quick/deep depth triggers.** A bounded 2–4 item "what fails in
     production" narrative, each traced to a diff line, gated by `depth_triggers` (new public
@@ -91,7 +91,7 @@ read this, do one iteration from "Backlog", append to "Iteration log", commit.**
 | 4 | 2026-10-18 | **reaction → feedback** via hidden fingerprint marker (no client), `reaction` event support, resolution in `/engine/stats?repo=` | Bugbot's "did it get fixed" loop; Vercel openreview reactions | 62 tests pass (`test_webhook` reaction + suppression, `test_pipeline` marker) |
 | 5 | 2026-10-18 | wired **dead config**: `max_file_chars` char-budget gate + real `summary_only` (summary-only posting); moved `GITHUB_TOKEN` check after feedback path so reaction webhooks work tokenless | audit of `rules.py` vs usage; dwakshar token gate | 64 tests pass, boot smoke (stats 200, reaction `feedback-recorded`) |
 | 6 | 2026-10-18 | **Walkthrough** digest in the summary (commits, effort 1–5, per-module files, severity counts) + **context sources** line | CodeRabbit/CodePeel walkthroughs, CodeRabbit "source line" transparency | 66 tests pass (`test_pipeline` walkthrough) |
-| 7 | 2026-10-18 | **File-review cache** (`file_cache` table, 7-day TTL, key = added lines + rules + lenses) — skips the LLM on identical diffs | v1 cache done right; large-PR cost | 68 tests pass (`test_store`, `test_pipeline` cache) |
+| 7 | 2026-10-18 | **File-review cache** (`file_cache` table, 7-day TTL, key = added lines + rules + lenses): skips the LLM on identical diffs | v1 cache done right; large-PR cost | 68 tests pass (`test_store`, `test_pipeline` cache) |
 | 8 | 2026-10-18 | **Deterministic secret scanner** (`secretscan.py`): regex ground-truth findings, masked evidence, bypass model gate, posted as `blocker` | CodeRabbit "40+ scanners" layer, scoped down; MSR'26 signal-to-noise findings | 71 tests pass (`test_secretscan`) |
 | 9 | 2026-10-18 | **Ticket/spec validation**: `tickets.py` (keyword parse + acceptance criteria), GitHub **GraphQL `closingIssuesReferences`** with keyword fallback, `spec` lens verdicts addressed/partial/not_addressed/unclear, `Ticket:` line in the walkthrough, `check_ticket:` rule | CodeRabbit linked-issue validation; Greptile Jira/Linear ingestion | 80 tests pass (`test_tickets`, `test_pipeline` spec lens), boot smoke (engine 200) |
 | 10 | 2026-10-18 | **Persistent code graph**: `indexer.py` (stdlib `ast` + regex fallback), incremental per-file index (`repo_index`), import graph, reverse deps, `tests_for`, personalized-PageRank file retrieval and a bounded `context_pack` fed to every lens; cache key now salts on context | Greptile/CodeRabbit "codegraph", Aider repo-map PageRank | 90 tests pass (`test_indexer`, `test_pipeline` graph context), boot smoke (engine 200) |
@@ -99,8 +99,8 @@ read this, do one iteration from "Backlog", append to "Iteration log", commit.**
 | 12 | 2026-10-18 | **Layered, base-branch rules**: config discovered **upward** from the changed files (`rules.config_candidates`), each later (nearer) file wins, `AGENTS.md`/`.cursorrules` become team rules, everything read at the PR **base** commit so a PR cannot change how it is reviewed | Cursor Bugbot (community rules upward, config from base branch) | 103 tests pass (`test_rules` layered, `test_pipeline` base-ref + nested) |
 | 13 | 2026-10-18 | **IDE repo-awareness + repos endpoint**: extension sends `repo`/`branch`/`imports` + up to 5 related-file excerpts; `review_snippet` indexes them and injects graph + recall context; `store.known_repos()` + `GET /api/v1/engine/repos` | Greptile "same context everywhere"; dashboard/onboarding | 105 tests pass, `tsc` build clean, boot smoke (`/engine/repos` 200) |
 | 14 | 2026-10-18 | **Scale + no-waste pass** (measure → fix → re-measure with `backend/bench.py`): SQLite **WAL + busy_timeout + bounded connection pool** (was one connect/thread per store call), batched `put_index_many`/`prune_index`, single-query `known_repos` + `recent_prs_for_paths`; **global review admission control** (`MAX_ACTIVE_REVIEWS`) + per-repo lock; **shared keep-alive HTTP pool** for the LLM (was a client per call); concurrent verify gates (was one round-trip per finding); **quadratic `build_graph` replaced by dictionary lookups** (9.4s → ~30ms on 2000 files, equivalence-tested); docs split into `docs/`, README cut to ~90 lines | Industry-standard patterns: WAL/connection pooling, bounded concurrency, admission control, keep-alive pooling, removing O(n²) | 110 tests pass (`test_indexer` graph equivalence, `test_store` WAL/bounded-pool/concurrent-writers), boot smoke |
-| 15 | 2026-10-18 | **Reliability pass on the architecture review** (every claim verified against code first): *hollow review* fixed — a failed lens call returned an error dict that `_merge_usage` silently dropped, so a total provider outage posted `looks-good/100`; now calls/errors are counted and an all-failed review posts "could not run" and records `incomplete`. Also: **abandoned-run recovery** (`BUGLENS_STALE_RUN_MIN`, a crashed claim no longer blocks the revision forever), **signed fingerprint markers** (HMAC — a forged `<!-- buglens:fp=… -->` can no longer poison suppression), **shared GitHub HTTP pool** (was a client per call), **parallel file fetches** (20–30 sequential round-trips → bounded gather), **exact in-process code-graph cache** (22 ms → ~1 ms, versioned by a DB write counter), **bounded per-repo locks** (were retained forever), **paginated comment upsert** (>100 comments duplicated the summary), **`save_findings` no longer fatal**, **daily sweep** for file-cache/repo-index growth | Principal-engineer review of the codebase; standard reliability patterns (fail loud, reclaim stale work, authenticate feedback, keep-alive pooling, bound everything, invalidate caches exactly) | 120 tests pass (`test_pipeline` incomplete-review/cache/locks/concurrent-fetch, `test_store` stale-claim/sweep/version, `test_webhook` forged-marker rejection), boot smoke |
-| 16 | 2026-10-18 | **Honesty + convergence pass** (from the 13-post PR-review learning wave, `temp/intel/buglens-pr-review-learning-2026-10.md`): every consolidated review now ends with an **`Engine:` cost line** — calls, failures, tokens (only when the provider reports them) and wall-clock, with a **dollar figure only when `BUGLENS_COST_PER_1M_IN/_OUT` are set** (never invented) — plus a plain line disclosing every optional layer that changed depth (consensus N, verify stats, secret scan, ticket check, code graph, recall, partial failures). **Re-review discipline**: `max_rounds` (10) and `converge_rounds` (3) in `.buglens.yml` — past `converge_rounds` only files whose reviewed content changed are re-reviewed (deterministic content hash, `pr_round_files` ledger), and past `max_rounds` a round-cap note is upserted and the bot stops (the agent-writes / agent-reviews loop is the documented #1 cost sink) | Learning wave: usage-trust backlash (#5), revert-rate guardrail (#3), Codex denial circuit-breaker (#4), Cursor sub-4-min budget (#12) | 132 tests pass (`test_pipeline` footer/round-cap/convergence, `test_store` round ledger, `test_rules` knobs), boot smoke |
+| 15 | 2026-10-18 | **Reliability pass on the architecture review** (every claim verified against code first): *hollow review* fixed: a failed lens call returned an error dict that `_merge_usage` silently dropped, so a total provider outage posted `looks-good/100`; now calls/errors are counted and an all-failed review posts "could not run" and records `incomplete`. Also: **abandoned-run recovery** (`BUGLENS_STALE_RUN_MIN`, a crashed claim no longer blocks the revision forever), **signed fingerprint markers** (HMAC: a forged `<!-- buglens:fp=… -->` can no longer poison suppression), **shared GitHub HTTP pool** (was a client per call), **parallel file fetches** (20–30 sequential round-trips → bounded gather), **exact in-process code-graph cache** (22 ms → ~1 ms, versioned by a DB write counter), **bounded per-repo locks** (were retained forever), **paginated comment upsert** (>100 comments duplicated the summary), **`save_findings` no longer fatal**, **daily sweep** for file-cache/repo-index growth | Principal-engineer review of the codebase; standard reliability patterns (fail loud, reclaim stale work, authenticate feedback, keep-alive pooling, bound everything, invalidate caches exactly) | 120 tests pass (`test_pipeline` incomplete-review/cache/locks/concurrent-fetch, `test_store` stale-claim/sweep/version, `test_webhook` forged-marker rejection), boot smoke |
+| 16 | 2026-10-18 | **Honesty + convergence pass** (from the 13-post PR-review learning wave, `temp/intel/buglens-pr-review-learning-2026-10.md`): every consolidated review now ends with an **`Engine:` cost line**: calls, failures, tokens (only when the provider reports them) and wall-clock, with a **dollar figure only when `BUGLENS_COST_PER_1M_IN/_OUT` are set** (never invented), plus a plain line disclosing every optional layer that changed depth (consensus N, verify stats, secret scan, ticket check, code graph, recall, partial failures). **Re-review discipline**: `max_rounds` (10) and `converge_rounds` (3) in `.buglens.yml`: past `converge_rounds` only files whose reviewed content changed are re-reviewed (deterministic content hash, `pr_round_files` ledger), and past `max_rounds` a round-cap note is upserted and the bot stops (the agent-writes / agent-reviews loop is the documented #1 cost sink) | Learning wave: usage-trust backlash (#5), revert-rate guardrail (#3), Codex denial circuit-breaker (#4), Cursor sub-4-min budget (#12) | 132 tests pass (`test_pipeline` footer/round-cap/convergence, `test_store` round ledger, `test_rules` knobs), boot smoke |
 
 ## Cost honesty + convergence discipline (iteration 16)
 Two failure modes the whole 2026 field converged on: **nobody trusts usage they cannot see**,
@@ -128,7 +128,7 @@ max_rounds: 10        # 0 disables the cap
 converge_rounds: 3    # from round 4 only code new since a prior round
 ```
 - `store.count_rounds(repo, pr)` = rows in `runs` for the PR (a duplicate delivery or a draft
-  skip never counts — it never reaches `claim_run`).
+  skip never counts: it never reaches `claim_run`).
 - Past `converge_rounds`, `pipeline` hashes each file's whole hunk (`_content_sha`, kind+text)
   and, via the `pr_round_files` ledger, keeps only files not already reviewed → **zero model
   calls** when nothing changed, and a "N rounds without convergence" note in the summary.
@@ -143,7 +143,7 @@ review. Ours:
 - `rules.config_candidates(changed_paths)` returns root config names first, then every
   ancestor directory of every changed file from shallow to deep, each with
   `.buglens.yml|.yaml|.json` plus `AGENTS.md` / `.cursorrules` / `CLAUDE.md`.
-- `load_rules(configs)` applies them **in order** — nearest wins, values from wider scopes
+- `load_rules(configs)` applies them **in order**: nearest wins, values from wider scopes
   survive. Bullet lines from instruction files are appended to `custom_rules`.
 - `pipeline.load_rules_for_pr(owner, repo, ref, changed_paths, cache)` fetches at `ref`
   (always the base commit) and caches within the run; the pipeline makes two passes (root
@@ -155,7 +155,7 @@ The extension now tells the backend which repo it is in (`getRepoSlug()` parses
 `.git/config`), the branch, the module specs the file imports (`collectImports`, per
 language) and excerpts of up to 5 local imports (`collectRelated`, via `workspace.fs`).
 `review_snippet(..., repo=, related=, imports=)` indexes those files, builds the code graph
-and pulls the same related-file pack + prior-review block the PR bot uses — so an IDE
+and pulls the same related-file pack + prior-review block the PR bot uses, so an IDE
 finding lines up with the PR finding. `GET /api/v1/engine/repos` lists the repos the store
 knows (runs, posted, resolution rate) for the dashboard picker.
 
@@ -167,7 +167,7 @@ comments before posting. We already had the raw material (`findings`, `outcomes`
 - `prior_findings(repo, paths)` joins posted findings on the **changed files** to their
   outcome verdicts; each one is classified `fixed` (resolved), `dismissed` (2+ 👎),
   `agreed` (👍) or `open`.
-- `recall_block(repo, paths)` renders a ≤8-bullet digest — open/agreed findings with their
+- `recall_block(repo, paths)` renders a ≤8-bullet digest: open/agreed findings with their
   PR numbers, a count of what was fixed, a count of what was dismissed, and which PR last
   touched each file. Fixes and dismissals are summarized, never re-raised as findings.
 - `remember_history(repo, paths)` fills `file_prs` from GitHub (`commits?path=` →
@@ -220,7 +220,7 @@ We do the same with GitHub alone:
    (severity `major`/`minor`, category `merge`); the model/evidence gate is bypassed for them
    because they are PR-level verdicts with no single line, and they never invent requirements.
 4. `rules.check_ticket` (default `true`) turns the whole thing off; any GitHub failure is
-   swallowed — spec context is a bonus, never a reason to fail a review.
+   swallowed. Spec context is a bonus, never a reason to fail a review.
 
 ## Resolution rate (the metric that keeps us honest)
 On `pull_request.closed` with `merged: true`, the webhook calls
@@ -234,7 +234,7 @@ two verdicts and are aggregated by `store.resolution_stats(repo)`:
 ```
 
 They are deliberately **not** part of the suppression math (`suppressed()` only counts
-`down`) — resolution is a quality signal for us, not a preference signal from the team.
+`down`): resolution is a quality signal for us, not a preference signal from the team.
 
 ## Consensus voting (`consensus:` in `.buglens.yml`)
 ```

@@ -34,7 +34,7 @@ def validate_config() -> list[str]:
             problems.append(f"{name} is set to a placeholder value ({value!r})")
 
     if not os.getenv("GITHUB_WEBHOOK_SECRET"):
-        # Not fatal — the app serves the IDE endpoint fine — but webhooks will
+        # Not fatal, the app serves the IDE endpoint fine, but webhooks will
         # refuse every request until it is set (fail closed, never fail open).
         logger.warning("GITHUB_WEBHOOK_SECRET is not set: PR webhooks are disabled.")
 

@@ -1,7 +1,7 @@
 """Provider-agnostic OpenAI-compatible LLM client.
 
 Works with Groq (default), OpenAI, Together, local vLLM/llama.cpp, or the local
-opencode free proxy — anything that speaks ``POST {base}/chat/completions``. This
+opencode free proxy, anything that speaks ``POST {base}/chat/completions``. This
 replaces the v1 Groq-SDK-only path and fixes three of its weaknesses:
 
 * key rotation is guarded by a lock (v1 mutated a global from concurrent tasks);
@@ -154,8 +154,8 @@ _client: httpx.AsyncClient | None = None
 def _http() -> httpx.AsyncClient:
     """One process-wide keep-alive pool.
 
-    Creating an ``AsyncClient`` per call (the old behaviour) meant a fresh TCP handshake —
-    and a fresh TLS handshake for https — for every lens, every consensus pass and every
+    Creating an ``AsyncClient`` per call (the old behaviour) meant a fresh TCP handshake
+    and a fresh TLS handshake for https, for every lens, every consensus pass and every
     verify call. Under a burst of webhooks that is the difference between a few sockets and
     thousands of them.
     """

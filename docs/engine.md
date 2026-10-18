@@ -5,7 +5,7 @@ it actually does to your diff.
 
 ## Pipeline
 
-1. **Fetch** the PR — paginated file list, base/head SHAs, linked issues, and the target
+1. **Fetch** the PR: paginated file list, base/head SHAs, linked issues, and the target
    file contents when snippets are needed.
 2. **Parse** the unified diff into per-file added lines with **new-file** line numbers.
    Everything downstream refers to those numbers.
@@ -31,10 +31,10 @@ it actually does to your diff.
 | `performance` | N+1 queries, blocking I/O, needless allocation, hot-path work |
 | `ui` | accessibility, state bugs, layout/reflow, missing loading and error states |
 | `tests` | missing or weak coverage for the change, tests asserting nothing |
-| `maintainability` | dead code, duplication, unclear names — only when it matters |
+| `maintainability` | dead code, duplication, unclear names, but only when it matters |
 | `merge` | merge-readiness and, when a ticket is linked, spec compliance |
 
-A lens can be scoped to file extensions and severity, and you can add your own — see
+A lens can be scoped to file extensions and severity, and you can add your own. See
 **Custom lenses** below.
 
 ## Verification, or why you get fewer comments
@@ -49,9 +49,9 @@ BugLens is tuned for precision over volume. A finding is dropped unless:
 
 Two classes bypass the model gate because they are ground truth:
 
-- **Deterministic secret scanner** — regex hits on added lines. The value is masked in the
+- **Deterministic secret scanner**: regex hits on added lines. The value is masked in the
   output and never sent to the model.
-- **Ticket criteria** — assertions about your own acceptance criteria, not code claims.
+- **Ticket criteria**: assertions about your own acceptance criteria, not code claims.
 
 `consensus: 3` in `.buglens.yml` runs three shuffled passes and posts only what wins the
 majority. It costs 3x tokens and is off by default.
@@ -80,10 +80,10 @@ It gives each review:
 
 For every changed file the engine looks up findings it posted before, and their outcomes:
 
-- `fixed` — you fixed it after the review,
-- `dismissed` — your team down-voted it,
-- `agreed` — up-voted,
-- `open` — still stands.
+- `fixed`: you fixed it after the review,
+- `dismissed`: your team down-voted it,
+- `agreed`: up-voted,
+- `open`: still stands.
 
 Open items are restated compactly; dismissed ones are suppressed; fixed ones are counted so
 the review does not re-litigate. Prior PRs that touched the same files add one line each.
@@ -143,9 +143,9 @@ grouped by module, findings by severity, the ticket verdict, and **which context
 
 ## Cost and disclosure
 
-Every consolidated review ends with a compact `Engine:` line — engine calls, failed calls,
+Every consolidated review ends with a compact `Engine:` line: engine calls, failed calls,
 tokens (only if the provider reported them), an optional dollar figure (only if
-`BUGLENS_COST_PER_1M_IN`/`_OUT` are set) and wall-clock — plus a plain line naming every
+`BUGLENS_COST_PER_1M_IN`/`_OUT` are set) and wall-clock, plus a plain line naming every
 optional layer that changed review depth (consensus passes, verify drop stats, secret scan,
 linked-ticket check, code graph, prior-review recall, and any partial call failures). Nothing
 that changes how deep we looked happens silently, and no number is invented.

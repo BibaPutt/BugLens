@@ -2,8 +2,8 @@
 
 One entry point per surface:
 
-* :func:`review_pr` — a GitHub pull request (webhook).
-* :func:`review_snippet` — a chunk of code from the IDE extension.
+* :func:`review_pr`, a GitHub pull request (webhook).
+* :func:`review_snippet`, a chunk of code from the IDE extension.
 
 Everything is best-effort and bounded: any single model call failing degrades the
 result instead of failing the review, and posting is skipped cleanly when there is
@@ -177,7 +177,7 @@ def _lens_health(usage: dict) -> tuple[int, int]:
 def _content_sha(fd: FileDiff) -> str:
     """Deterministic hash of a file's whole diff hunk (kind + text).
 
-    Answers "did this file change since we last reviewed it?" without another network fetch —
+    Answers "did this file change since we last reviewed it?" without another network fetch:
     the diff we already hold is the review unit. ``\\x1f`` separates kind from text so a
     context line and an added line with the same body never collide."""
     payload = "".join(f"{l.kind}\x1f{l.text}\n" for l in fd.lines)
@@ -210,7 +210,7 @@ def _fmt_duration(seconds: float) -> str:
 
 
 def _cost_estimate(usage: dict) -> str:
-    """A dollar figure only when the operator supplied rates — never invent a price.
+    """A dollar figure only when the operator supplied rates, never invent a price.
 
     Providers reprice constantly and a confidently wrong number is worse than none (this is
     the whole "uncounted usage" backlash). Set ``BUGLENS_COST_PER_1M_IN``/``_OUT`` to opt in.
@@ -255,7 +255,7 @@ def _engine_notes(rules: Rules, verified, all_findings: list[dict],
                   converging: bool) -> list[str]:
     """Plain-language disclosure of every optional layer that changed review depth.
 
-    No feature may alter review depth silently — the non-consensual-defaults lesson."""
+    No feature may alter review depth silently, the non-consensual-defaults lesson."""
     notes: list[str] = []
     if int(getattr(rules, "consensus", 1) or 1) > 1:
         notes.append(f"consensus {rules.consensus} passes")
@@ -273,7 +273,7 @@ def _engine_notes(rules: Rules, verified, all_findings: list[dict],
     if recall:
         notes.append("prior-review recall")
     if calls and failures and failures < calls:
-        notes.append(f"partial: {failures}/{calls} model call(s) failed — some files may be under-reviewed")
+        notes.append(f"partial: {failures}/{calls} model call(s) failed, some files may be under-reviewed")
     if converging:
         notes.append(f"{rules.converge_rounds}+ rounds without convergence")
     return notes
@@ -374,7 +374,7 @@ async def _summarise(findings: list[dict], files: list[str], lenses_run: list[st
 
 # ── rendering ─────────────────────────────────────────────────────────────────
 def render_finding_md(f: dict) -> str:
-    head = f"{sev.emoji(f.get('severity'))} **{sev.label(f.get('severity'))} · {f.get('category')}** — {f.get('title')}"
+    head = f"{sev.emoji(f.get('severity'))} **{sev.label(f.get('severity'))} · {f.get('category')}**, {f.get('title')}"
     parts = [head]
     if f.get("body"):
         parts.append(f["body"])
@@ -541,14 +541,14 @@ async def _run_spec_lens(ticket_block: str, diff_digest: str, rules: Rules) -> t
 
 
 def _review_effort(picked: list[FileDiff]) -> int:
-    """1–5, derived from how much changed — the same "review effort" CodeRabbit shows."""
+    """1–5, derived from how much changed, the same "review effort" CodeRabbit shows."""
     chars = sum(fd.added_chars for fd in picked)
     return max(1, min(5, 1 + len(picked) // 3 + chars // 6000))
 
 
 def _context_sources(tree: list[str], file_texts: dict[str, str], custom_lens_names: list[str],
                      graph_files: int = 0, ticket: bool = False, recall: bool = False) -> list[str]:
-    """Which guardrails shaped this review — CodeRabbit's 'source line' idea, cheaply."""
+    """Which guardrails shaped this review, CodeRabbit's 'source line' idea, cheaply."""
     sources = [p for p in convention_paths(tree) if p in file_texts]
     sources += [f"custom lens: {n}" for n in custom_lens_names]
     if graph_files:
@@ -580,7 +580,7 @@ def _walkthrough_md(res: ReviewResult) -> list[str]:
         lines.append(f"**Ticket:** {res.ticket_summary}")
     if res.files:
         lines += ["", f"**Files reviewed ({len(res.files)}):**", ""]
-        lines += [f"- `{m}` — {n} finding(s)" if n else f"- `{m}`" for m, n in sorted(modules.items())[:15]]
+        lines += [f"- `{m}`, {n} finding(s)" if n else f"- `{m}`" for m, n in sorted(modules.items())[:15]]
     if res.context_sources:
         lines += ["", f"**Context used:** {', '.join(f'`{s}`' for s in res.context_sources)}"]
     lines += ["", "</details>"]
@@ -604,13 +604,13 @@ def render_summary_md(res: ReviewResult, rules: Rules) -> str:
         lines += ["", "### Findings"]
         for f in res.findings[: rules.max_comments]:
             loc = f"{f['path']}:{f['line']}" if f.get("line") else f["path"]
-            lines.append(f"- {sev.emoji(f.get('severity'))} `{loc}` — {f.get('title')}")
+            lines.append(f"- {sev.emoji(f.get('severity'))} `{loc}`, {f.get('title')}")
     if res.positives:
         lines += ["", "### What's good"]
         lines += [f"- {p}" for p in res.positives]
     if res.skipped:
         lines += ["", "<details><summary>Files skipped</summary>", ""]
-        lines += [f"- `{s['path']}` — {s['reason']}" for s in res.skipped[:25]]
+        lines += [f"- `{s['path']}`, {s['reason']}" for s in res.skipped[:25]]
         lines += ["", "</details>"]
     lines.append("")
     stats = _engine_stats(res.usage, res.wall_seconds)
@@ -627,7 +627,7 @@ def render_round_cap_md(rules: Rules) -> str:
     clobbers the last review comment, and upsert keeps it idempotent across pushes."""
     return "\n".join([
         MARKER_CAP,
-        "## 🔁 BugLens — review round limit reached",
+        "## 🔁 BugLens: review round limit reached",
         f"This PR has had **{rules.max_rounds}** BugLens reviews. To keep the feedback loop "
         "from churning (agent-writes-code / agent-reviews-code is the documented cost sink), "
         "BugLens stops posting new review comments here.",
@@ -639,7 +639,7 @@ def render_round_cap_md(rules: Rules) -> str:
 
 def _convergence_note(rules: Rules, round_no: int) -> str:
     return (
-        f"**{rules.converge_rounds} rounds without convergence** — since round "
+        f"**{rules.converge_rounds} rounds without convergence**: since round "
         f"{rules.converge_rounds} BugLens only reviews code *new* to each round, and nothing "
         "has changed since the last one. Reconsider the approach rather than re-requesting "
         "review."
@@ -660,7 +660,7 @@ _GRAPH_CACHE_MAX = 8
 
 
 def _repo_lock(slug: str) -> list:
-    """Serializes reviews of the same repo — keeps the shared index/cache coherent and
+    """Serializes reviews of the same repo, keeps the shared index/cache coherent and
     stops ten pushes to one repo from stampeding the LLM. Reference-counted so the dict
     does not retain a lock per repo forever."""
     entry = _repo_locks.get(slug)
@@ -946,7 +946,7 @@ async def _review_pr(owner: str, repo: str, pr_number: int, *, base_sha: str | N
         usage = _merge_usage(usage, u)
         lenses_run.update(names)
 
-    # Deterministic secret scan — no model, no doubt; runs on every added line.
+    # Deterministic secret scan, no model, no doubt; runs on every added line.
     for fd in picked:
         all_findings.extend(secretscan.scan(fd))
     if any(f.get("deterministic") for f in all_findings):
@@ -1000,7 +1000,7 @@ async def _review_pr(owner: str, repo: str, pr_number: int, *, base_sha: str | N
         score = 0
         summary = (
             "The review could not run: every model call failed "
-            f"({failures}/{calls}). This is **not** a clean review — re-run it with "
+            f"({failures}/{calls}). This is **not** a clean review, re-run it with "
             "`@buglens review` once the provider is reachable."
         )
         res_note = usage.get("error_sample") or ""
@@ -1148,7 +1148,7 @@ async def review_snippet(code: str, language: str, filename: str = "snippet",
 
     When the client tells us which repo it is (and optionally hands over a few related
     files it already read), we index them and pull the same code-graph + prior-review
-    context the PR bot uses — so IDE findings line up with PR findings.
+    context the PR bot uses, so IDE findings line up with PR findings.
     """
     rules = rules or load_rules()
     if focus:
@@ -1189,7 +1189,7 @@ async def review_snippet(code: str, language: str, filename: str = "snippet",
     calls, failures = _lens_health(merged)
     if calls and failures >= calls:          # IDE: say so instead of showing a 100/100
         return ReviewResult(
-            status="incomplete", summary="Review unavailable — the model could not be reached.",
+            status="incomplete", summary="Review unavailable, the model could not be reached.",
             score=0, verdict="incomplete", findings=[], files=[fd.path], lenses_run=names,
             model_used=llm.model_name(), usage=merged, review_effort=_review_effort([fd]),
             wall_seconds=time.monotonic() - t0,
@@ -1241,7 +1241,7 @@ async def measure_resolution(owner: str, repo: str, pr_number: int, head_sha: st
     This is Cursor's "resolution rate": for each finding we posted, look at the
     merged file. If the quoted evidence is gone (or the file is gone), the author
     acted on it → `resolved`; otherwise `unresolved`. These verdicts are recorded
-    separately from 👍/👎 so they never feed the suppression set — they are a
+    separately from 👍/👎 so they never feed the suppression set, they are a
     quality metric, not a preference signal.
     """
     await store.init(db)

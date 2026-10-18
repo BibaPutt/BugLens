@@ -1,3 +1,5 @@
+import re
+
 import pytest
 
 from buglens import github, llm, pipeline
@@ -15,7 +17,8 @@ async def _fake_llm(messages, **kwargs):
     if "PR-level summary" in system:
         return LLMResult(data={"summary": "sum", "score": 88, "verdict": "needs-attention",
                                "highlights": ["h"], "positives": ["p"]})
-    lens = messages[1]["content"].split("LENS: ", 1)[1].split(" ", 1)[0]
+    matched = re.search(r"LENS:\s*([^\s|(]+)", messages[1]["content"])
+    lens = matched.group(1) if matched else ""
     if lens == "security":
         return LLMResult(data={"findings": [{
             "severity": "major", "category": "security", "line": 2, "title": "eval on user input",

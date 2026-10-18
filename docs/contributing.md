@@ -23,7 +23,7 @@ uv venv
 uv pip install -r requirements.txt
 ```
 
-There is no `pip` in the workflow — use `uv`. On Windows the interpreter is
+There is no `pip` in the workflow. Use `uv`. On Windows the interpreter is
 `.venv/Scripts/python.exe`; elsewhere `.venv/bin/python`.
 
 ## Tests
@@ -65,5 +65,5 @@ measurement before and after any performance change; the numbers in
 
 ## Pull requests
 
-Push a branch and open a PR — BugLens reviews this repository too, so you will see the engine
+Push a branch and open a PR. BugLens reviews this repository too, so you will see the engine
 in action on your own change.

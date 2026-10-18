@@ -87,7 +87,7 @@ curl "$HOST/api/v1/engine/repos"
 curl -H "X-Admin-Key: $ADMIN_API_KEY" "$HOST/api/v1/engine/stats?repo=owner/name"
 ```
 
-`/engine/stats` returns `503` when `ADMIN_API_KEY` is not configured — that is deliberate, so
+`/engine/stats` returns `503` when `ADMIN_API_KEY` is not configured. That is deliberate, so
 an unconfigured deployment never exposes counters.
 
 Repo parameters always take the `owner/repo` form.

@@ -2,7 +2,7 @@
 
 Modelled on Bugbot Rules, CodeRabbit's repo config and Greptile's plain-English
 rules: the repo decides what is in scope, how loud the bot may be, and what its
-own conventions are. Parsing is deliberately dependency-free — PyYAML if it is
+own conventions are. Parsing is deliberately dependency-free, PyYAML if it is
 importable, otherwise a small parser for the subset we document.
 """
 from __future__ import annotations
@@ -185,7 +185,7 @@ def config_candidates(changed_paths: list[str] | None = None, limit: int = 40) -
     """Config paths to fetch, in precedence order: repo root first, then each changed
     file's directory from shallow to deep, so the **nearest** config wins.
 
-    This is Cursor Bugbot's model — community rules are discovered by walking *up* from the
+    This is Cursor Bugbot's model, community rules are discovered by walking *up* from the
     files a PR touches, not from a fixed root file.
     """
     out: list[str] = list(CONFIG_NAMES)

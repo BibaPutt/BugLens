@@ -3,11 +3,11 @@
 Backed by SQLite (aiosqlite) so the engine runs with zero infrastructure and the
 tests can use a temp file. Three things live here that make the bot iterative:
 
-* **deliveries / runs** — a webhook redelivery or a second push of the same
+* **deliveries / runs**, a webhook redelivery or a second push of the same
   revision cannot re-post the same review (v1 had no memory at all).
-* **findings** — every finding is stored with a stable fingerprint, so the same
+* **findings**, every finding is stored with a stable fingerprint, so the same
   comment is not re-posted on the next push.
-* **outcomes** — 👍/👎 from comment reactions and the IDE feed a suppression set:
+* **outcomes**, 👍/👎 from comment reactions and the IDE feed a suppression set:
   a finding fingerprint down-voted twice is never posted again, and up-voted
   patterns are injected into the prompt as "this team likes this". That is the
   cheap version of Greptile's "stops commenting on things you don't care about".
@@ -54,7 +54,7 @@ async def _open(path: str):
     """Borrow one of at most ``_POOL_SIZE`` connections for this DB file.
 
     aiosqlite multiplexes operations onto a private thread per connection, but a *new*
-    connection means a new thread plus handshakes — the engine used to pay that on every
+    connection means a new thread plus handshakes, the engine used to pay that on every
     store call (~5ms/op). Connections are now reused from a per-file queue, and the
     semaphore bounds how many exist: concurrent callers **wait** for a free connection
     instead of each spawning a thread. WAL lets readers proceed while a writer commits.
@@ -234,7 +234,7 @@ async def reviewed_contents(repo: str, pr: int, before_round: int,
                             path: str | None = None) -> dict[str, set[str]]:
     """{path: {content_sha, ...}} for files already reviewed in *earlier* rounds.
 
-    ``first_round < before_round`` — a file whose reviewed content hash is in here has not
+    ``first_round < before_round``, a file whose reviewed content hash is in here has not
     changed since a prior round and does not need to be reviewed again."""
     path = path or db_path()
     async with _open(path) as db:
@@ -301,7 +301,7 @@ async def mark_posted(run_id: str, path: str | None = None) -> None:
 
 
 async def posted_fingerprints(repo: str, path: str | None = None) -> set[str]:
-    """Fingerprints already posted on this repo (across runs) — cross-push dedupe."""
+    """Fingerprints already posted on this repo (across runs), cross-push dedupe."""
     path = path or db_path()
     async with _open(path) as db:
         rows = await (await db.execute(
@@ -467,7 +467,7 @@ async def put_index(repo: str, file_path: str, sha: str, lang: str, data: dict,
 
 async def put_index_many(repo: str, records: list[dict], db_file: str | None = None) -> None:
     """Write many parsed files in one transaction (index_files used to open one
-    connection — and therefore one aiosqlite thread — per file)."""
+    connection, and therefore one aiosqlite thread, per file)."""
     if not records:
         return
     now = _now()
@@ -519,7 +519,7 @@ async def recent_prs_for_file(repo: str, file_path: str, limit: int = 5,
 
 async def recent_prs_for_paths(repo: str, paths: list[str], limit: int = 5,
                                db_file: str | None = None) -> dict[str, list[dict]]:
-    """Batch form of ``recent_prs_for_file`` — one query for every changed file."""
+    """Batch form of ``recent_prs_for_file``, one query for every changed file."""
     if not paths:
         return {}
     db_file = db_file or db_path()
@@ -620,7 +620,7 @@ async def sweep(days_cache: int = 7, days_repo: int = 30, path: str | None = Non
     """Drop expired file-cache rows and index history for repos we have not seen in a while.
 
     Neither table was ever cleaned, so a long-running instance accumulated them without
-    bound. Note this deletes whole repos' index rows, never individual paths — pruning
+    bound. Note this deletes whole repos' index rows, never individual paths, pruning
     individual paths is unsafe because a review only knows about the files it fetched.
     """
     path = path or db_path()

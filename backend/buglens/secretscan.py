@@ -1,4 +1,4 @@
-"""Deterministic secret scanner — the one gate that is never wrong the way an LLM is.
+"""Deterministic secret scanner, the one gate that is never wrong the way an LLM is.
 
 A regex hit on an added line is a *fact*, not an opinion, so these findings skip the
 model verify gate (see ``verify.verify_all``) and post at ``blocker``. Values are

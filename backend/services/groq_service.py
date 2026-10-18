@@ -48,7 +48,7 @@ def _rotate_key() -> bool:
     global _current_key_index
     if _current_key_index < len(API_KEYS) - 1:
         _current_key_index += 1
-        print(f"[BugLens] Rate limit hit — rotating to API key {_current_key_index + 1}/{len(API_KEYS)}")
+        print(f"[BugLens] Rate limit hit, rotating to API key {_current_key_index + 1}/{len(API_KEYS)}")
         return True
     return False
 
@@ -97,9 +97,9 @@ async def call_groq_with_retry(messages: list, retries: int = 3) -> str:
 
             except Exception as e:
                 error_str = str(e)
-                # 413 = request too large — truncate and retry with smaller input
+                # 413 = request too large, truncate and retry with smaller input
                 if '413' in error_str or 'Request too large' in error_str:
-                    print(f"[BugLens] Request too large — reduce MAX_CODE_CHARS in review_prompt.py")
+                    print(f"[BugLens] Request too large, reduce MAX_CODE_CHARS in review_prompt.py")
                     raise Exception("Code is too large to review. Please select a specific function or section.")
                 if attempt < retries - 1:
                     wait = 2 ** attempt
@@ -114,7 +114,7 @@ async def call_groq_with_retry(messages: list, retries: int = 3) -> str:
 async def review_code(request: ReviewRequest) -> ReviewResponse:
     code_hash = get_code_hash(request.code, request.language)
 
-    # Try cache — skip if stale/invalid
+    # Try cache, skip if stale/invalid
     try:
         cached = await get_cached_review(code_hash)
         if cached:

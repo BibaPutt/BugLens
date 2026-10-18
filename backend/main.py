@@ -51,7 +51,7 @@ SWEEP_HOURS = float(os.getenv("BUGLENS_SWEEP_HOURS", "24"))
 async def _sweep_loop() -> None:
     """Housekeeping: expire the file cache and drop index history for dormant repos.
 
-    Runs in-process on a timer — no cron, no new service. Errors are logged, never raised,
+    Runs in-process on a timer, no cron, no new service. Errors are logged, never raised,
     so a failed sweep cannot take the app down.
     """
     while True:
@@ -79,7 +79,7 @@ limiter = Limiter(
 app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
-# ─── CORS — scoped to real origins only ───────────────────────────────────
+# ─── CORS, scoped to real origins only ───────────────────────────────────
 ALLOWED_ORIGINS = [o.strip() for o in os.getenv("ALLOWED_ORIGINS", "*").split(",") if o.strip()]
 app.add_middleware(
     CORSMiddleware,

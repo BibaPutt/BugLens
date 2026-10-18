@@ -2,11 +2,11 @@
 
 Fixes the v1 client's worst behaviours:
 
-* **pagination** — v1 fetched only the first 30 files (GitHub's default page);
-* **file content** — v1 only ever had the patch, so it reviewed a diff blob;
-* **inline reviews** — v1 posted one issue-level comment per file; v2 posts one
+* **pagination**, v1 fetched only the first 30 files (GitHub's default page);
+* **file content**, v1 only ever had the patch, so it reviewed a diff blob;
+* **inline reviews**, v1 posted one issue-level comment per file; v2 posts one
   review with comments pinned to real added lines;
-* **honest errors** — every call checks status and raises instead of logging
+* **honest errors**, every call checks status and raises instead of logging
   success on a 403 (v1 printed "✅ posted" after a failed POST).
 """
 from __future__ import annotations
@@ -250,7 +250,7 @@ async def graphql(query: str, variables: dict) -> dict:
 async def closing_issues(owner: str, repo: str, number: int) -> list[dict]:
     """Issues a PR will close, per GitHub itself (default-branch aware).
 
-    Returns [{number,title,url,body,repo}]. Empty on any failure — spec context is a
+    Returns [{number,title,url,body,repo}]. Empty on any failure, spec context is a
     bonus, never a reason to fail a review.
     """
     try:

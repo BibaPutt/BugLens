@@ -38,7 +38,7 @@ async def submit_feedback(body: FeedbackRequest, request: Request):
 
 @router.get("/engine", tags=["engine"])
 async def engine_overview():
-    """What the running engine can do — handy for the dashboard and for debugging."""
+    """What the running engine can do, handy for the dashboard and for debugging."""
     rules = load_rules()
     return {
         "lenses": lenses.describe_all(),

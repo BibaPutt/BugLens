@@ -3,10 +3,10 @@
 Greptile keeps a knowledge base of past reviews; CodeRabbit remembers past comments so it
 does not repeat itself. We get the same effect from data we already persist:
 
-* ``prior_findings`` — findings we posted on the **same files** in earlier PRs, with the
+* ``prior_findings``, findings we posted on the **same files** in earlier PRs, with the
   outcome verdicts joined in, so we can tell *fixed*, *dismissed* and *still open* apart.
-* ``dismissed`` — titles the team down-voted twice; never raise them again.
-* ``prior_prs`` — recent PRs that touched the changed files (from ``file_prs``, filled by
+* ``dismissed``, titles the team down-voted twice; never raise them again.
+* ``prior_prs``, recent PRs that touched the changed files (from ``file_prs``, filled by
   ``remember_history`` using the GitHub commits-per-path API, capped and cached).
 
 ``recall_block`` renders all of it as a small, hard-budgeted set of bullets that the
