@@ -22,15 +22,15 @@ def _load_api_keys() -> list[str]:
         key = os.getenv(f"GROQ_API_KEY_{i}")
         if key:
             keys.append(key)
-    # Deduplicate while preserving order
+    # Deduplicate while preserving order. An empty list is fine: the app boots
+    # and the affected endpoints return 503 instead of the whole service dying
+    # at import time (the v1 behaviour, which made the app unstartable).
     seen = set()
     unique = []
     for k in keys:
         if k not in seen:
             seen.add(k)
             unique.append(k)
-    if not unique:
-        raise RuntimeError("No GROQ API keys found. Set GROQ_API_KEY or GROQ_API_KEY_1..5 in .env")
     return unique
 
 API_KEYS = _load_api_keys()
@@ -70,6 +70,8 @@ def strip_json_fences(text: str) -> str:
 
 # ─── Groq call with key rotation ─────────────────────────────────────────────
 async def call_groq_with_retry(messages: list, retries: int = 3) -> str:
+    if not API_KEYS:
+        raise RuntimeError("No GROQ API keys configured.")
     keys_tried = 0
 
     while keys_tried < len(API_KEYS):
@@ -148,7 +150,7 @@ async def review_code(request: ReviewRequest) -> ReviewResponse:
 
     # Cache the fresh result
     try:
-        await cache_review(code_hash, response.dict())
+        await cache_review(code_hash, response.model_dump())
     except Exception as e:
         print(f"Cache write failed (non-fatal): {e}")
 

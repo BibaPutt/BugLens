@@ -44,6 +44,9 @@ class ChatResponse(BaseModel):
 async def chat_about_code(request_body: ChatRequest, request: Request):
     await enforce_daily_budget(request, bucket="chat", max_per_day=300)
 
+    if not API_KEYS:
+        return ChatResponse(reply="Chat is not configured on this server yet.")
+
     system_prompt = f"""You are BugLens, an expert code reviewer assistant.
 The user is asking questions about this {request_body.language} code from {request_body.filename or 'their file'}.
 
