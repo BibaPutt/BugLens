@@ -22,6 +22,8 @@ Three surfaces, one review engine:
 - **GitHub PR bot**: reviews every pull request, posts one consolidated review with
   apply-in-one-click suggestion blocks. It never blocks a PR.
 - **Dashboard + API**: `/api/v1/review`, history, and engine stats.
+- **Local MCP server**: read-only tools over stdio for MCP clients such as Claude Desktop and
+  Cursor. See [operations.md](docs/operations.md#mcp-server).
 
 ## Install
 

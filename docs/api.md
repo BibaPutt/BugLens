@@ -19,6 +19,10 @@ Authentication uses `X-Extension-Key` for `/review` and `X-Admin-Key` for
 `/engine/stats`. `POST /feedback` is unauthenticated by design (it is driven by GitHub
 reactions) and is rate limited.
 
+Alongside the HTTP API, BugLens ships a local stdio MCP server (not an HTTP endpoint), run
+with `python -m buglens.mcp_server`. See
+[operations.md](operations.md#mcp-server) for the tool list and client configuration.
+
 ## POST /api/v1/review
 
 ```bash

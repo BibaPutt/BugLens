@@ -107,6 +107,50 @@ processes; without it they are per-process, which is correct for a single-instan
   👎 to suppress real findings.
 - `/engine/stats` answers `503` when `ADMIN_API_KEY` is unset, rather than exposing counters.
 
+## MCP server
+
+BugLens ships a local Model Context Protocol server over stdio, so an MCP client (Claude
+Desktop, Cursor, and similar) can call BugLens tools. It is standard-library only: no extra
+dependency, no web server, and no required service. It reads the same local SQLite database
+as the backend.
+
+Run it from `backend` with that directory's virtualenv:
+
+```bash
+python -m buglens.mcp_server
+```
+
+Client configuration:
+
+```json
+{
+  "mcpServers": {
+    "buglens": {
+      "command": "python",
+      "args": ["-m", "buglens.mcp_server"],
+      "cwd": "/path/to/backend"
+    }
+  }
+}
+```
+
+The server speaks JSON-RPC 2.0 over stdio, one JSON object per line, and implements
+`initialize`, `tools/list`, `tools/call` and `ping`. A malformed line is answered with a
+JSON-RPC parse error rather than crashing the session.
+
+Six read-only tools:
+
+- `review` with `{owner, repo, number}`: run a review. `dry_run` defaults to `true`, so it
+  never posts a comment unless the client explicitly sets `dry_run: false`.
+- `findings` with `{repo, number}`: the stored findings for a PR. `repo` is `owner/name`.
+- `recall` with `{repo, path}`: prior findings recorded against a file path.
+- `context` with `{repo, changed}`: code-graph neighbours of the changed paths plus a
+  bounded context pack. `changed` is a list of paths.
+- `stats` with `{repo}`: engine stats, verifier drop stats and per-lens outcome stats.
+- `repos`: the repos BugLens has seen.
+
+A tool error is reported in-band as `isError: true`, never by crashing the session.
+
 ## Troubleshooting
 
 | Symptom | Likely cause |
