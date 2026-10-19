@@ -12,17 +12,11 @@ from __future__ import annotations
 
 from . import severity as sev
 from .diff import FileDiff
-from .premortem import tokens  # same whole-token path matching as the depth triggers
+from .premortem import RISKY_TOKENS, tokens  # one shared path-risk definition
 from .walkthrough import classify
 
 LEVELS = ("L0", "L1", "L2", "L3")
 
-_RISKY_TOKENS = frozenset({
-    "auth", "authentication", "authorization", "login", "logout", "oauth", "token", "tokens",
-    "session", "sessions", "permission", "permissions", "password", "passwords", "crypto",
-    "security", "acl", "credential", "credentials", "payment", "payments", "billing", "wallet",
-    "checkout", "crypto", "secret", "secrets", "key", "keys",
-})
 _HIGH = frozenset({"blocker"})
 _MID = frozenset({"major"})
 
@@ -35,13 +29,15 @@ def _raise_to(current: str, level: str) -> str:
     return level if _index(level) > _index(current) else current
 
 
-def tier(findings: list[dict], fds: list[FileDiff], secrets_flagged: bool = False) -> dict:
+def tier(findings: list[dict], fds: list[FileDiff], secrets_flagged: bool = False,
+         surprises: list[str] | None = None) -> dict:
     """Compute the tier and the reasons it was raised.
 
     Returns ``{"level": "L0".."L3", "reasons": [str], "advisory": str}``. L1 is any code change;
     L2 is a mid-severity finding or a large diff; L3 is a high/blocker finding, a secret, a
     schema migration, or a payment/auth/security path. Two overrides raise one level regardless of
-    size: an irreversible change and weak evidence (code changed with no test change).
+    size: an irreversible change and weak evidence (code changed with no test change). Any
+    ``surprises`` (from :mod:`surprise`) raise the tier to at least L2 and are named.
     """
     reasons: list[str] = []
     code_files = [fd for fd in fds if classify(fd.path) not in ("docs", "tests")]
@@ -59,7 +55,7 @@ def tier(findings: list[dict], fds: list[FileDiff], secrets_flagged: bool = Fals
         bump("L2", "medium-severity finding")
     if secrets_flagged:
         bump("L3", "secret scanner flagged")
-    risky = [fd.path for fd in fds if tokens(fd.path) & _RISKY_TOKENS]
+    risky = [fd.path for fd in fds if tokens(fd.path) & RISKY_TOKENS]
     if risky:
         bump("L3", f"payment/auth/security path: {risky[0]}")
     migration = [fd.path for fd in fds if tokens(fd.path) & {"migration", "migrations", "alembic"}]
@@ -69,6 +65,8 @@ def tier(findings: list[dict], fds: list[FileDiff], secrets_flagged: bool = Fals
         bump("L2", "large diff (200+ added lines)")
     if code_files and not any(classify(fd.path) == "tests" for fd in fds):
         bump(_raise_to(level, "L2"), "weak evidence: code changed, no test change")
+    for s in surprises or []:
+        bump(_raise_to(level, "L2"), f"surprise: {s}")
 
     if not reasons:
         reasons.append("small, low-risk change")

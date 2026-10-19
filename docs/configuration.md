@@ -126,6 +126,10 @@ One more key governs the advisory triage line (see
 prints `Review depth recommended: L0-L3` at the top of the comment from the findings, the diff
 size, whether tests changed, and risky paths. It is advisory only and never blocks.
 
+`surprise_detector` (default `true`) feeds that line: it flags a change that does not match the
+kind of work the PR claims to be (a docs PR touching code, a bug fix touching a migration, a UI
+change touching auth, a non-feature PR adding a dependency) and raises the tier to at least L2.
+
 Two keys are where a human applies a learned suggestion (see
 [engine.md](engine.md#learning-from-feedback)): `ignore_paths:` takes globs for a scope the team
 keeps dismissing, and `focus:` takes the lens allow-list, so dropping a down-voted lens means

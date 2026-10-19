@@ -433,6 +433,21 @@ The reasons are printed with the line (for example `auth/security path: src/auth
 weak evidence: code changed, no test change`). `risk_tiers: false` turns the line off; the tier is
 still computed for the API surface.
 
+### Surprises
+
+The highest-value human review move is asking why a change does not belong. `surprise.detect`
+classifies the PR from its title (`fix`, `feature`, `refactor`, `docs`, `test`, `chore`) and flags
+a mismatch with the actual files, deterministically and for free:
+
+- a docs PR that changes code, or a tests-only PR that changes product code;
+- a refactor or a bug fix that touches a schema migration;
+- a UI change that touches a payment/auth/security path;
+- a fix/refactor/docs/test PR that **adds a dependency** manifest.
+
+A surprise is named in the tier reasons (`surprise: UI change touches an auth/security path: ...`)
+and raises the tier to at least L2. `surprise_detector: false` turns it off. It never blocks and
+never changes which passes run.
+
 ## Cost and disclosure
 
 Every consolidated review ends with a compact `Engine:` line: engine calls, failed calls,

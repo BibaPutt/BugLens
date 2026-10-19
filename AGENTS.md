@@ -52,6 +52,7 @@ user says **"final"**. Never print or commit the token.
 | `walkthrough.py` | deterministic Change-Stack grouping: classify changed files into ordered chapters (schema→models→logic→api→ui→config→tests→docs), per-chapter notes; no model |
 | `premortem.py` | pure risk triggers + depth tier: `triggers` (whole-token path match + added-line volume), `tier` (`quick`/`deep`), `select` (keeps only scenarios anchored on an added line), `render_md`; no model |
 | `risktier.py` | pure advisory L0-L3 triage tier: `tier` (findings + risky paths + migration + large diff + weak evidence), `advisory`, `render_header_md`; no model, no extra pass |
+| `surprise.py` | pure surprise detector: `pr_kind` (title -> fix/feature/refactor/docs/test/chore), `detect` (a change that does not match the claimed kind: docs PR touching code, fix touching a migration, UI touching auth, non-feature PR adding a dependency); no model |
 | `chat.py` | threaded `@buglens` commands: `parse_command` routing, `answer` (deterministic Change-Stack for `explain`, one bounded `complete_text` for `why`/`ask`), `handoff_prompts` Fix-All, `handle_command` posts an in-thread reply |
 | `github.py` | REST **and GraphQL**: PR files (paginated), file content, inline review, upsert comment, check runs (create/update/find with annotations), `closingIssuesReferences`, issue fetch, PR/commit history; **review-comment management**: `list_review_comments`, `reply_review_comment`, `update_review_comment`, `delete_review_comment`, `minimize_comment` (GraphQL, never raises) |
 | `store.py` | SQLite: run idempotency, findings, **file_cache**, **repo_index**/**file_prs** (code graph + file history), delivery dedupe, outcomes → suppression, **drops** (verifier rationale) and learned lens/dismissal stats, **posted_comments** (comment lifecycle ledger: fingerprint → path/line/comment_id/node_id/head_sha) |
@@ -112,6 +113,10 @@ Wiring: `routers/webhook.py` → `pipeline.review_pr`; `routers/review.py` → `
       iteration 29 (Wave N) = advisory risk tiers: a pure `risktier.py` composes an L0-L3 triage
       line (`Review depth recommended: L3 - read closely`) from findings, risky paths, a migration,
       a large diff and weak evidence, at zero model cost; it is advisory and never blocks.
+      iteration 30 (Wave O) = surprise detector: a pure `surprise.py` classifies the PR kind from
+      its title and flags a change that does not belong (docs PR touching code, fix touching a
+      migration, UI touching auth, non-feature PR adding a dependency), naming it and raising the
+      tier to L2+.
       **Full plan:
       `../temp/intel/buglens-v2-beat-plan-2026-10.md` (Waves A–J).** Inline reply chat shipped;
       multi-model consensus (second model) still open)*
@@ -268,6 +273,17 @@ identity. `POST /api/v1/feedback` and `/engine/stats?repo=` expect `owner/repo`.
   the prompt: the user asked about this file, now, and recall there demoted four real defects to a
   prose aside and scored the file clean. The PR bot keeps recall (it must not repeat itself across
   rounds); the IDE gets code-graph context only.
+
+## Surprise detector (iteration 30, do not regress)
+- **`surprise.py` is pure.** Title + file list in, plain-language surprises out. No model, no I/O,
+  no labels or extra service required (the title is enough).
+- **One shared risk definition.** It imports `premortem.RISKY_TOKENS` and `premortem.tokens`; never
+  inline a second risky-path matcher or a second tokenizer. A payment/auth/security path must be
+  "risky" everywhere or nowhere.
+- **`pr_kind` reads a conventional prefix first** (`fix(api):` -> `fix`), else the first word;
+  unmapped titles are `unknown` and produce no surprises. Any surprise raises the risk tier to at
+  least L2 and is named `surprise: <text>`; `surprise_detector: false` turns the whole thing off.
+- **It is advisory.** Never let a surprise block, gate, or change which passes run.
 
 ## Risk tiers (iteration 29, do not regress)
 - **`risktier.py` is pure and free.** Findings + files in, `{level, reasons, advisory}` out. No

@@ -15,6 +15,15 @@ from .diff import FileDiff
 MAX_ITEMS = 4
 LARGE_ADDED_LINES = 200
 
+# One shared definition of a risky surface: the depth trigger and the risk tier both use it, so a
+# payment/auth/security path can never be "deep" for one and "low risk" for the other.
+RISKY_TOKENS = frozenset({
+    "auth", "authentication", "authorization", "login", "logout", "oauth", "token", "tokens",
+    "session", "sessions", "permission", "permissions", "password", "passwords", "crypto",
+    "security", "acl", "credential", "credentials", "payment", "payments", "billing", "wallet",
+    "checkout", "secret", "secrets", "key", "keys",
+})
+
 # A trigger fires on a whole path token (never a substring): `auth` must not fire on `author.py`.
 _TRIGGERS: tuple[dict, ...] = (
     {
@@ -30,10 +39,7 @@ _TRIGGERS: tuple[dict, ...] = (
     },
     {
         "name": "auth/security path",
-        "tokens": frozenset({"auth", "authentication", "authorization", "login", "logout", "oauth",
-                             "token", "tokens", "session", "sessions", "permission", "permissions",
-                             "password", "passwords", "crypto", "security", "acl", "credential",
-                             "credentials"}),
+        "tokens": RISKY_TOKENS,
         "statuses": None,
     },
     {

@@ -23,7 +23,7 @@ import uuid
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 
-from . import adapters, checks, dedupe, github, indexer, integrations, learn, llm, objects, premortem, prodcontext, prompts, recall, risktier, secretscan, store, symbols, tickets, verify, walkthrough
+from . import adapters, checks, dedupe, github, indexer, integrations, learn, llm, objects, premortem, prodcontext, prompts, recall, risktier, secretscan, store, surprise, symbols, tickets, verify, walkthrough
 from . import lenses as L
 from .context import build_context, extract_symbols, language_of
 from .diff import FileDiff, DiffLine, ADD, choose_paths, parse_patch
@@ -1324,8 +1324,11 @@ async def _review_pr(owner: str, repo: str, pr_number: int, *, base_sha: str | N
 
     # The risk tier is advisory and free: it names how closely a human should read, from signals
     # already on hand (findings, path, test presence). It never blocks and never changes the
-    # passes that ran; that is the depth tier above.
-    risk = (risktier.tier(kept, picked, secrets_flagged="secrets" in lenses_run)
+    # passes that ran; that is the depth tier above. A surprise (a change that does not match the
+    # kind of work the PR claims to be) raises it and is named with the rest.
+    surprises = (surprise.detect(surprise.pr_kind(pr_info.title), picked)
+                 if getattr(rules, "surprise_detector", True) else [])
+    risk = (risktier.tier(kept, picked, secrets_flagged="secrets" in lenses_run, surprises=surprises)
             if getattr(rules, "risk_tiers", True) else {"level": "", "reasons": []})
 
     # A review where every model call failed must not report itself as a clean pass. The

@@ -47,6 +47,7 @@ DEFAULTS = {
     "depth_triggers": True,
     "premortem": True,
     "risk_tiers": True,
+    "surprise_detector": True,
     "max_rounds": 10,
     "converge_rounds": 3,
     "external_context": [],
@@ -84,6 +85,7 @@ class Rules:
     depth_triggers: bool = True          # risky surface (route/migration/auth/large) selects the deep tier
     premortem: bool = True               # deep tier: a bounded "what breaks in production" section
     risk_tiers: bool = True               # advisory L0-L3 triage line at the top of the review
+    surprise_detector: bool = True        # flag a change that does not match the PR's claimed kind
     max_rounds: int = 10                 # 0 disables the re-review cap
     converge_rounds: int = 3             # from round N+1 only code new since a prior round
     ignore_paths: list[str] = field(default_factory=list)
@@ -353,6 +355,7 @@ def describe(rules: Rules) -> dict:
         "depth_triggers": rules.depth_triggers,
         "premortem": rules.premortem,
         "risk_tiers": rules.risk_tiers,
+        "surprise_detector": rules.surprise_detector,
         "max_rounds": rules.max_rounds,
         "converge_rounds": rules.converge_rounds,
         "linters": rules.linters,

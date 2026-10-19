@@ -127,6 +127,7 @@ read this, do one iteration from "Backlog", append to "Iteration log", commit.**
 | 27 | 2026-10-19 | **Wave L**: **honest failure + IDE chat + event loop** (`pipeline.MARKER_ERROR` / `render_error_md`; IDE chat routing; `asyncio.to_thread`): a could-not-run notice when the PR files cannot be fetched (403/429/5xx), one permanent id-routed chat listener in the IDE panel, and `adapters.scan` moved off the event loop | An external architecture review raised eleven findings; three were false (adapters have a hard timeout, `file_cache` is age-pruned for every repo, `formatChatReply` escaping is correct at runtime) and the rest were polish. Only the fetch-failure silence, the per-send chat listeners, and the blocking linter call held | 328 tests pass (`test_pipeline` +5) |
 | 28 | 2026-10-19 | **Wave M**: **pre-mortem + depth tiers** (`premortem.py` pure; `pipeline._premortem`; `depth_triggers`/`premortem` keys): whole-token path risk (new route, migration, auth/security path, 200+ added lines) selects a deterministic quick/deep tier named in the footer, and the deep tier adds a collapsed "what could break in production" section of 2-4 scenarios, each kept only if anchored on a line the PR added | Greptile/Macroscope set the bar for a risk narrative rather than a flat finding list; the triggers keep the extra model call off ordinary diffs | 341 tests pass (`test_premortem` new, `test_pipeline` +4) |
 | 29 | 2026-10-19 | **Wave N**: **advisory risk tiers (L0-L3)** (`risktier.py` pure; `risk_tiers` key; header line): compose `Review depth recommended: L3 - read closely` from the findings, risky payment/auth/security paths, a schema migration, a large diff and weak evidence (code changed, no test change), with the reasons named | Backlog item 10 (a recommended top-5): tells a human how closely to read at zero model cost, no extra pass, never blocking | 350 tests pass (`test_risktier` new, `test_pipeline` +2) |
+| 30 | 2026-10-19 | **Wave O**: **surprise detector** (`surprise.py` pure; `surprise_detector` key; feeds the triage line): classify the PR kind from its title (fix/feature/refactor/docs/test/chore) and flag a change that does not belong (a docs PR touching code, a fix or refactor touching a schema migration, a UI change touching auth, a non-feature PR adding a dependency) | Backlog item 11 (a recommended top-5): the highest-value human review move is asking why a change does not belong; deterministic, no labels needed | 359 tests pass (`test_surprise` new, `test_pipeline` +1) |
 
 ## Review-grade output + precision (iteration 26)
 A review now reads like the hosted reviewers, without adding a service.
@@ -159,6 +160,20 @@ A review now reads like the hosted reviewers, without adding a service.
 - **The IDE hid known bugs behind prior recall.** With the store reachable the snippet path fed PR
   recall into the prompt, the model moved four real defects into an aside, and the panel scored the
   file `88/100` with one warning. The IDE now reviews the file as it is (`score 32`, 4 issues).
+
+## Surprise detector (iteration 30)
+Review by surprise, not by line count.
+
+- **Pure and offline.** `surprise.pr_kind(title)` classifies the PR; `surprise.detect(kind, files)`
+  returns the mismatches. No model, no labels, no extra service: the title and the file list are
+  enough.
+- **What it flags.** A docs PR that changes code, a tests-only PR that changes product code, a
+  refactor or bug fix that touches a schema migration, a UI change that touches a payment/auth/
+  security path, and a fix/refactor/docs/test PR that adds a dependency manifest.
+- **One risk definition.** It reuses `premortem.RISKY_TOKENS`/`tokens`, so a path is risky for the
+  depth trigger and the risk tier alike.
+- **Wired into the triage line.** A surprise is named (`surprise: <text>`) and raises the tier to at
+  least L2. `surprise_detector: false` turns it off. Advisory only.
 
 ## Risk tiers (iteration 29)
 The top of a review now says how closely a human should read, for free.

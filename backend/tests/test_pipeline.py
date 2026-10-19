@@ -1086,6 +1086,22 @@ async def test_review_header_shows_an_advisory_risk_tier(monkeypatch, db):
     assert "read closely" in md
 
 
+async def test_surprise_raises_the_tier_and_is_named_in_the_header(monkeypatch, db):
+    monkeypatch.setattr(llm, "complete_json", _premortem_llm([]))
+    _patch_github(monkeypatch, [{"filename": "app/service.py", "status": "modified", "patch": PATCH}])
+
+    async def get_pr(*a, **k):
+        return PRInfo("o", "r", 1, "basesha", "headsha", False, "docs: update the readme", "", "a", "open")
+
+    monkeypatch.setattr(github, "get_pr", get_pr)
+
+    res = await pipeline.review_pr("o", "r", 1, dry_run=True, db=db, rules=load_rules())
+
+    assert res.risk_tier == "L2"
+    assert any(r.startswith("surprise: docs PR changes code") for r in res.risk_reasons)
+    assert "surprise: docs PR changes code" in pipeline.render_summary_md(res, load_rules())
+
+
 async def test_risk_tiers_off_removes_the_advisory(monkeypatch, db):
     monkeypatch.setattr(llm, "complete_json", _premortem_llm([]))
     _patch_github(monkeypatch, [{"filename": "src/auth/login.py", "status": "added", "patch": AUTH_PATCH}])
