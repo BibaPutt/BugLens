@@ -918,3 +918,92 @@ async def test_external_context_failure_is_swallowed(monkeypatch, db):
 
     assert res.status == "dry-run"
     assert not any("external context" in n for n in res.engine_notes)
+
+
+async def test_fetch_failure_posts_could_not_run_notice(monkeypatch, db):
+    posted = {}
+
+    async def boom(*a, **k):
+        raise RuntimeError("403 rate limit exceeded")
+
+    async def upsert(owner, repo, number, marker, body, *a, **k):
+        posted["marker"] = marker
+        posted["body"] = body
+        return {"id": 1}
+
+    _patch_github(monkeypatch, [])
+    monkeypatch.setattr(github, "get_pr_files", boom)
+    monkeypatch.setattr(github, "upsert_marked_comment", upsert)
+
+    res = await pipeline.review_pr("o", "r", 1, db=db)
+
+    assert res.status == "error"
+    assert res.posted is True
+    assert posted["marker"] == pipeline.MARKER_ERROR
+    assert "could not review" in posted["body"]
+    assert "not a clean review" in posted["body"]
+    assert "403 rate limit exceeded" in posted["body"]
+
+
+async def test_fetch_failure_notice_is_best_effort(monkeypatch, db):
+    async def boom(*a, **k):
+        raise RuntimeError("403 rate limit exceeded")
+
+    async def upsert(*a, **k):
+        raise RuntimeError("rate limited anyway")
+
+    _patch_github(monkeypatch, [])
+    monkeypatch.setattr(github, "get_pr_files", boom)
+    monkeypatch.setattr(github, "upsert_marked_comment", upsert)
+
+    res = await pipeline.review_pr("o", "r", 1, db=db)
+
+    assert res.status == "error"
+    assert res.posted is False
+
+
+async def test_fetch_failure_posts_nothing_in_dry_run(monkeypatch, db):
+    called = {"n": 0}
+
+    async def boom(*a, **k):
+        raise RuntimeError("boom")
+
+    async def upsert(*a, **k):
+        called["n"] += 1
+
+    _patch_github(monkeypatch, [])
+    monkeypatch.setattr(github, "get_pr_files", boom)
+    monkeypatch.setattr(github, "upsert_marked_comment", upsert)
+
+    res = await pipeline.review_pr("o", "r", 1, dry_run=True, db=db)
+
+    assert res.status == "error"
+    assert called["n"] == 0
+
+
+async def test_error_note_flattens_and_strips_backticks():
+    md = pipeline.render_error_md("bad\n```\nthing`   here")
+    assert pipeline.MARKER_ERROR in md
+    assert "```" not in md
+    assert "`here" not in md.replace("`bad", "")
+
+
+async def test_adapters_run_off_the_event_loop(monkeypatch, db):
+    from buglens import adapters
+
+    monkeypatch.setattr(llm, "complete_json", _fake_llm)
+    _patch_github(monkeypatch, [{"filename": "a.py", "status": "modified", "patch": PATCH}])
+    monkeypatch.setattr(adapters, "scan", lambda *a, **k: ([], []))
+    real = pipeline.asyncio.to_thread
+    seen = []
+
+    async def spy(fn, *a, **k):
+        seen.append(fn)
+        return await real(fn, *a, **k)
+
+    monkeypatch.setattr(pipeline.asyncio, "to_thread", spy)
+
+    await pipeline.review_pr("o", "r", 1, dry_run=True, db=db)
+
+    assert adapters.scan in seen
+

@@ -98,7 +98,11 @@ Wiring: `routers/webhook.py` → `pipeline.review_pr`; `routers/review.py` → `
       security-risk header scoped to a commit, P1/P2/P3 priority labels, evidence-first finding
       bodies with a lens list and additional locations, pre-merge checks as a status+fix table,
       cross-lens semantic dedup (`dedupe.py`), and inline-comment lifecycle (acknowledge resolved,
-      collapse only confirmed-gone findings) over a `posted_comments` ledger.
+      collapse only confirmed-gone findings) over a       `posted_comments` ledger.
+      iteration 27 (Wave L) = the three real findings from an external architecture review, after
+      verifying the rest were false: a **could-not-run** notice when the PR files cannot be
+      fetched (`403`/`429`/`5xx`), one permanent id-routed chat listener in the IDE panel, and
+      deterministic adapters executed off the event loop.
       **Full plan:
       `../temp/intel/buglens-v2-beat-plan-2026-10.md` (Waves A–J).** Inline reply chat shipped;
       multi-model consensus (second model) still open)*
@@ -255,6 +259,25 @@ identity. `POST /api/v1/feedback` and `/engine/stats?repo=` expect `owner/repo`.
   the prompt: the user asked about this file, now, and recall there demoted four real defects to a
   prose aside and scored the file clean. The PR bot keeps recall (it must not repeat itself across
   rounds); the IDE gets code-graph context only.
+
+## Failure notice and IDE chat (iteration 27, do not regress)
+- **A review that could not run says so.** When `github.get_pr_files` raises (403/429/5xx),
+  `_review_pr` posts `render_error_md(reason)` under `pipeline.MARKER_ERROR` and still returns
+  `status="error"`. This is the reliability rule (iteration 15) applied to the fetch phase: no
+  green summary, and no silent blank either. The post is **best-effort** (a hard rate limit
+  refuses it too), so the failure is `log.warning`'d regardless, and the run is finished as
+  `error` with `res.posted` reflecting what actually happened. Never make this comment mandatory
+  or let a post failure raise.
+- **`render_error_md` sanitizes its input.** The reason comes from an exception message, which may
+  embed model or API output: it is whitespace-flattened, stripped of backticks, and truncated
+  before it goes inside a code span. Keep it that way.
+- **Adapters run off the event loop.** `adapters.scan` shells out synchronously with a hard
+  timeout; both call sites (`_review_pr`, `review_snippet`) use `asyncio.to_thread`. On the loop it
+  would stall every other request for up to the timeout per file. Never call it directly again.
+- **The IDE chat has exactly one message listener.** It routes by the `id` the webview puts in the
+  chat payload and the host echoes back on `chatReply`/`chatError`. Per-send listeners made every
+  handler answer every reply (the second question showed the first answer, then unbound, dropping
+  the real reply). The extra `id` field is ignored by the backend `ChatRequest`, which is fine.
 
 ## Code objects and per-lens caps (iteration 23, do not regress)
 - **`objects.py` is pure and deterministic.** `build_units` reuses `symbols.changed_defs` (it does

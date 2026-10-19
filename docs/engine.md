@@ -123,7 +123,8 @@ Rules:
 - **Missing tool = no-op.** If an adapter's binary is not on `PATH`, it is skipped; it never
   errors and never fails a review.
 - **Bounded and shell-free.** Each run is a direct subprocess with no shell and a hard timeout
-  (`BUGLENS_LINTER_TIMEOUT`, default 25s).
+  (`BUGLENS_LINTER_TIMEOUT`, default 25s), executed off the event loop so a slow linter cannot
+  stall other reviews.
 - **Stable fingerprints.** An adapter hit is fingerprinted on `(file, rule, line)` so it is
   de-duplicated and suppressed like any other finding.
 - The set that ran is disclosed in the footer as `linters: ruff, eslint`.
@@ -404,3 +405,12 @@ failures). Nothing that changes how deep we looked happens silently, and no numb
 Re-review discipline keeps the loop bounded: past `converge_rounds` a PR is only re-reviewed
 where the diff actually changed (deterministic content hash, **no model calls** when nothing
 did), and past `max_rounds` BugLens posts a round-cap note and stops.
+
+### When a review cannot run
+
+If the engine cannot even fetch the PR (a `403`, a rate limit, a `5xx`), BugLens posts a short
+note saying the review could not run and that this is **not** a clean review, with the reason and
+a retry hint (`@buglens review`). It never leaves the PR looking reviewed when nothing was read,
+and it never leaves it silently blank. The note is best-effort: under a hard rate limit the post
+request is refused too, so the failure is also logged. This is a distinct marker from the review
+comment, so it upserts in place and never clobbers the last real review.

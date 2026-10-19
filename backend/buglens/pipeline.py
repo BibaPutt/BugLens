@@ -14,6 +14,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import hmac
+import logging
 import os
 import random
 import re
@@ -38,6 +39,8 @@ REVIEWABLE_EXTS = {
 }
 MARKER = "<!-- buglens:v2 -->"
 MARKER_CAP = "<!-- buglens:round-cap -->"
+MARKER_ERROR = "<!-- buglens:could-not-run -->"
+log = logging.getLogger(__name__)
 _CHECK_STATUS = {"pass": "✅ Pass", "warn": "⚠️ Warn", "info": "• Info"}
 STALE_REPLY = "BugLens: this finding is no longer present at {sha}. Marking the thread outdated."
 MAX_LENSES_PER_FILE = 3
@@ -776,6 +779,24 @@ def render_round_cap_md(rules: Rules) -> str:
     ])
 
 
+def render_error_md(reason: str) -> str:
+    """Honest note when the review could not run (e.g. the PR files could not be fetched).
+
+    Own marker so it never clobbers the last review, and upsert keeps it idempotent. The
+    reason is flattened and stripped of backticks: it comes from an exception message, which
+    may embed model or API output, so it must not be able to break out of the code span.
+    """
+    short = " ".join(str(reason).split()).replace("`", "'")[:300]
+    return "\n".join([
+        MARKER_ERROR,
+        "## ⚠️ BugLens could not review this pull request",
+        f"**Reason:** `{short}`",
+        "",
+        "No findings were produced, so **this is not a clean review**. Push a new commit or "
+        "comment `@buglens review` to retry.",
+    ])
+
+
 def _convergence_note(rules: Rules, round_no: int) -> str:
     return (
         f"**{rules.converge_rounds} rounds without convergence**: since round "
@@ -950,8 +971,22 @@ async def _review_pr(owner: str, repo: str, pr_number: int, *, base_sha: str | N
     try:
         raw_files = await github.get_pr_files(owner, repo, pr_number) if github.configured() else []
     except Exception as exc:
-        await store.finish_run(run_id, "error", 0, 0, False, db)
-        return ReviewResult(status="error", repo=repo, pr=pr_number, head_sha=head_sha, summary=f"could not fetch files: {exc}")
+        # A review that could not run must never look like a review that found nothing. When the
+        # files cannot be fetched (403/429/5xx), say so on the PR. Best-effort: a hard rate limit
+        # will also refuse this post, so the failure is logged regardless.
+        res = ReviewResult(status="error", repo=repo, pr=pr_number, head_sha=head_sha,
+                           summary=f"could not fetch files: {exc}")
+        res.wall_seconds = time.monotonic() - t0
+        if not dry_run and github.configured():
+            try:
+                await github.upsert_marked_comment(owner, repo, pr_number, MARKER_ERROR,
+                                                   render_error_md(exc))
+                res.posted = True
+            except Exception as post_exc:
+                log.warning("could not post could-not-run notice for %s#%s: %s",
+                            slug, pr_number, post_exc)
+        await store.finish_run(run_id, "error", 0, 0, res.posted, db)
+        return res
 
     # Second pass: now that we know the changed files, layer the nearest nested config.
     if not explicit_rules and github.configured() and raw_files:
@@ -1153,8 +1188,10 @@ async def _review_pr(owner: str, repo: str, pr_number: int, *, base_sha: str | N
 
     # Deterministic linters/SAST: the repo's own tools, offline, free, and never
     # vote-suppressed. Off unless `.buglens.yml` opts in (`linters: auto` or a list).
-    lint_findings, linters_run = adapters.scan(
-        file_texts, {fd.path: fd for fd in picked}, getattr(rules, "linters", [])
+    # `scan` shells out synchronously with a hard timeout, so it runs on a worker thread: on the
+    # event loop it would stall every other request for up to the linter timeout per file.
+    lint_findings, linters_run = await asyncio.to_thread(
+        adapters.scan, file_texts, {fd.path: fd for fd in picked}, getattr(rules, "linters", [])
     )
     if lint_findings:
         all_findings.extend(lint_findings)
@@ -1625,7 +1662,9 @@ async def review_snippet(code: str, language: str, filename: str = "snippet",
     findings, positives, usage, names = await _review_file(
         fd, lenses, rules, "", related_block, [], sem
     )
-    lint_findings, linters_run = adapters.scan({fd.path: code}, {fd.path: fd}, getattr(rules, "linters", []))
+    lint_findings, linters_run = await asyncio.to_thread(
+        adapters.scan, {fd.path: code}, {fd.path: fd}, getattr(rules, "linters", [])
+    )
     if lint_findings:
         findings.extend(lint_findings)
         names = [*names, "lint"]

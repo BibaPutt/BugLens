@@ -309,16 +309,17 @@ async function runReview(editor: vscode.TextEditor) {
         await jumpToLine(msg.line);
       }
       if (msg.command === 'chat') {
+        const id = msg.payload?.id;
         try {
           const { data } = await axios.post(
             `${getApiUrl()}/api/v1/chat`,
             msg.payload,
             { headers: { 'X-Extension-Key': EXTENSION_KEY }, timeout: 60000 }
           );
-          currentPanel?.webview.postMessage({ command: 'chatReply', reply: data.reply });
+          currentPanel?.webview.postMessage({ command: 'chatReply', id, reply: data.reply });
         } catch (err: any) {
           const detail = err.response?.data?.detail ?? err.message ?? 'Unknown error';
-          currentPanel?.webview.postMessage({ command: 'chatError', error: detail });
+          currentPanel?.webview.postMessage({ command: 'chatError', id, error: detail });
         }
       }
     });
@@ -824,6 +825,7 @@ const positivesHtml = review.positive_aspects?.length
       vscode.postMessage({
         command: 'chat',
         payload: {
+          id:             loadingId,
           code:           CODE,
           language:       LANG,
           filename:       FILENAME,
@@ -831,21 +833,26 @@ const positivesHtml = review.positive_aspects?.length
           messages:       chatHistory
         }
       });
-
-      window.addEventListener('message', function handler(event) {
-        if (event.data.command === 'chatReply') {
-          window.removeEventListener('message', handler);
-          const el = document.getElementById(loadingId);
-          if (el) { el.className = 'chat-msg bot'; el.innerHTML = formatChatReply(event.data.reply); }
-          chatHistory.push({ role: 'assistant', content: event.data.reply });
-        }
-        if (event.data.command === 'chatError') {
-          window.removeEventListener('message', handler);
-          const el = document.getElementById(loadingId);
-          if (el) { el.className = 'chat-msg bot'; el.textContent = 'Error: ' + event.data.error; }
-        }
-      });
     }
+
+    // One permanent listener, routed by the id each request carries. Registering a listener per
+    // send meant every handler answered every reply: with two questions in flight the second
+    // bubble showed the first answer, and both handlers unbound on that first reply so the real
+    // second answer was dropped.
+    window.addEventListener('message', function (event) {
+      const id = event.data && event.data.id;
+      if (!id) { return; }
+      const el = document.getElementById(id);
+      if (!el) { return; }
+      if (event.data.command === 'chatReply') {
+        el.className = 'chat-msg bot';
+        el.innerHTML = formatChatReply(event.data.reply);
+        chatHistory.push({ role: 'assistant', content: event.data.reply });
+      } else if (event.data.command === 'chatError') {
+        el.className = 'chat-msg bot';
+        el.textContent = 'Error: ' + event.data.error;
+      }
+    });
 
             function escapeHtml(str) {
           return str

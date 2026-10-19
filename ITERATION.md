@@ -124,6 +124,7 @@ read this, do one iteration from "Backlog", append to "Iteration log", commit.**
 | 24 | 2026-10-19 | **Wave H (W10)**: **ticket + production context** (`prodcontext.py` pure link/render; `integrations.py` optional self-hosted fetchers; `external_context` key): linked ticket text is matched to the changed symbols and optional Jira/Linear tickets plus Sentry/Datadog/PostHog signals join the prompt | Beat-plan Wave H; ties an issue to the code it touches; off by default, fail-soft, no new service | 271 tests pass (`test_prodcontext`, `test_integrations` new) |
 | 25 | 2026-10-19 | **Wave J**: **local MCP server** (`mcp_server.py`): stdlib-only JSON-RPC 2.0 over stdio exposing six read-only tools (`review` dry-run by default, `findings`, `recall`, `context`, `stats`, `repos`); one asyncio loop per session so the aiosqlite pool never crosses loops; no new dependency, no network | Beat-plan Wave J; lets Claude Desktop/Cursor read the engine locally without a token or a hosted service | 282 tests pass (`test_mcp_server` new) |
 | 26 | 2026-10-19 | **Wave K**: **review-grade output + precision** (`dedupe.py` pure; `severity.priority`; `store.posted_comments`; `github` comment management): verdict-reason/confidence/merge+security-risk header scoped to a commit, P1/P2/P3 labels, evidence-first finding bodies with a lens list and additional locations, pre-merge checks as a status+fix table, cross-lens semantic dedup, and an inline-comment lifecycle (acknowledge resolved, collapse only confirmed-gone findings). The live E2E then exposed three production bugs, fixed in the same iteration: the comment ledger and every `if db` store gate were dead in the webhook path (`db` never resolved), and the IDE path inherited prior-review recall and hid known bugs | Four pasted competitor reviews (Greptile/Bugbot/CodeRabbit/Macroscope) set the bar for readability and precision; SWR-Bench says precision is the limiter | 322 tests pass (`test_dedupe`, `test_github_comments`, `test_store_comments`, `test_review_grade` new); `e2e/e2e-report.md` records the 4-round live run |
+| 27 | 2026-10-19 | **Wave L**: **honest failure + IDE chat + event loop** (`pipeline.MARKER_ERROR` / `render_error_md`; IDE chat routing; `asyncio.to_thread`): a could-not-run notice when the PR files cannot be fetched (403/429/5xx), one permanent id-routed chat listener in the IDE panel, and `adapters.scan` moved off the event loop | An external architecture review raised eleven findings; three were false (adapters have a hard timeout, `file_cache` is age-pruned for every repo, `formatChatReply` escaping is correct at runtime) and the rest were polish. Only the fetch-failure silence, the per-send chat listeners, and the blocking linter call held | 328 tests pass (`test_pipeline` +5) |
 
 ## Review-grade output + precision (iteration 26)
 A review now reads like the hosted reviewers, without adding a service.
@@ -156,6 +157,24 @@ A review now reads like the hosted reviewers, without adding a service.
 - **The IDE hid known bugs behind prior recall.** With the store reachable the snippet path fed PR
   recall into the prompt, the model moved four real defects into an aside, and the panel scored the
   file `88/100` with one warning. The IDE now reviews the file as it is (`score 32`, 4 issues).
+
+## Honest failure, IDE chat, event loop (iteration 27)
+An external review of the engine raised eleven findings. Eight were wrong or cosmetic; these are the
+three that held.
+
+- **A fetch failure is no longer silent.** When `github.get_pr_files` raises (a `403`, a rate limit,
+  a `5xx`), the run finishes as `error` **and** posts a short notice under `MARKER_ERROR` saying the
+  review could not run and that it is not a clean review, with the reason and a retry hint.
+  Best-effort: a hard rate limit refuses the post too, so the failure is logged regardless. The
+  reason is flattened and stripped of backticks before it enters a code span (it can carry exception
+  text).
+- **The IDE chat routes replies to the right question.** The webview had registered a listener per
+  send, so with two questions in flight the second bubble showed the first answer and both handlers
+  unbound on that reply. One permanent listener now dispatches by the `id` the webview sends and the
+  host echoes back.
+- **Adapters no longer block the loop.** `adapters.scan` shells out synchronously with a hard
+  timeout; both call sites run it through `asyncio.to_thread`, so a slow linter cannot stall other
+  reviews.
 
 ## Local MCP server (iteration 25)
 `python -m buglens.mcp_server` speaks JSON-RPC 2.0 on stdio (protocol `2024-11-05`) with no `mcp`
