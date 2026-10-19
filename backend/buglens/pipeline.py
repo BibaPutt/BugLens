@@ -23,7 +23,7 @@ import uuid
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 
-from . import adapters, checks, dedupe, github, indexer, integrations, learn, llm, objects, premortem, prodcontext, prompts, recall, secretscan, store, symbols, tickets, verify, walkthrough
+from . import adapters, checks, dedupe, github, indexer, integrations, learn, llm, objects, premortem, prodcontext, prompts, recall, risktier, secretscan, store, symbols, tickets, verify, walkthrough
 from . import lenses as L
 from .context import build_context, extract_symbols, language_of
 from .diff import FileDiff, DiffLine, ADD, choose_paths, parse_patch
@@ -73,6 +73,8 @@ class ReviewResult:
     review_effort: int = 1
     ticket_summary: str = ""
     premortem: list[dict] = field(default_factory=list)
+    risk_tier: str = ""
+    risk_reasons: list[str] = field(default_factory=list)
     wall_seconds: float = 0.0
     round_no: int = 0
     converging: bool = False
@@ -780,6 +782,9 @@ def render_summary_md(res: ReviewResult, rules: Rules) -> str:
     if meta:
         lines.append("")
         lines.append(" · ".join(meta))
+    tier_line = risktier.render_header_md(res.risk_tier, res.risk_reasons)
+    if tier_line:
+        lines += ["", tier_line]
     lines += ["", res.summary or ""]
     lines += _walkthrough_md(res, rules)
     if res.premortem:
@@ -1317,6 +1322,12 @@ async def _review_pr(owner: str, repo: str, pr_number: int, *, base_sha: str | N
         usage = _merge_usage(usage, pm_usage)
         pm_items = premortem.select(proposed, picked)
 
+    # The risk tier is advisory and free: it names how closely a human should read, from signals
+    # already on hand (findings, path, test presence). It never blocks and never changes the
+    # passes that ran; that is the depth tier above.
+    risk = (risktier.tier(kept, picked, secrets_flagged="secrets" in lenses_run)
+            if getattr(rules, "risk_tiers", True) else {"level": "", "reasons": []})
+
     # A review where every model call failed must not report itself as a clean pass. The
     # old behaviour posted "looks-good / 100" and the team merged on a review that never ran.
     calls, failures = _lens_health(usage)
@@ -1367,6 +1378,7 @@ async def _review_pr(owner: str, repo: str, pr_number: int, *, base_sha: str | N
         verdict_reason=s["verdict_reason"], confidence=s["confidence"],
         merge_risk=s["merge_risk"], security_risk=s["security_risk"],
         premortem=pm_items,
+        risk_tier=risk["level"], risk_reasons=risk["reasons"],
     )
 
     try:                                   # findings are best-effort; never cost the review

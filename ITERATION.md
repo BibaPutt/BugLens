@@ -126,6 +126,7 @@ read this, do one iteration from "Backlog", append to "Iteration log", commit.**
 | 26 | 2026-10-19 | **Wave K**: **review-grade output + precision** (`dedupe.py` pure; `severity.priority`; `store.posted_comments`; `github` comment management): verdict-reason/confidence/merge+security-risk header scoped to a commit, P1/P2/P3 labels, evidence-first finding bodies with a lens list and additional locations, pre-merge checks as a status+fix table, cross-lens semantic dedup, and an inline-comment lifecycle (acknowledge resolved, collapse only confirmed-gone findings). The live E2E then exposed three production bugs, fixed in the same iteration: the comment ledger and every `if db` store gate were dead in the webhook path (`db` never resolved), and the IDE path inherited prior-review recall and hid known bugs | Four pasted competitor reviews (Greptile/Bugbot/CodeRabbit/Macroscope) set the bar for readability and precision; SWR-Bench says precision is the limiter | 322 tests pass (`test_dedupe`, `test_github_comments`, `test_store_comments`, `test_review_grade` new); `e2e/e2e-report.md` records the 4-round live run |
 | 27 | 2026-10-19 | **Wave L**: **honest failure + IDE chat + event loop** (`pipeline.MARKER_ERROR` / `render_error_md`; IDE chat routing; `asyncio.to_thread`): a could-not-run notice when the PR files cannot be fetched (403/429/5xx), one permanent id-routed chat listener in the IDE panel, and `adapters.scan` moved off the event loop | An external architecture review raised eleven findings; three were false (adapters have a hard timeout, `file_cache` is age-pruned for every repo, `formatChatReply` escaping is correct at runtime) and the rest were polish. Only the fetch-failure silence, the per-send chat listeners, and the blocking linter call held | 328 tests pass (`test_pipeline` +5) |
 | 28 | 2026-10-19 | **Wave M**: **pre-mortem + depth tiers** (`premortem.py` pure; `pipeline._premortem`; `depth_triggers`/`premortem` keys): whole-token path risk (new route, migration, auth/security path, 200+ added lines) selects a deterministic quick/deep tier named in the footer, and the deep tier adds a collapsed "what could break in production" section of 2-4 scenarios, each kept only if anchored on a line the PR added | Greptile/Macroscope set the bar for a risk narrative rather than a flat finding list; the triggers keep the extra model call off ordinary diffs | 341 tests pass (`test_premortem` new, `test_pipeline` +4) |
+| 29 | 2026-10-19 | **Wave N**: **advisory risk tiers (L0-L3)** (`risktier.py` pure; `risk_tiers` key; header line): compose `Review depth recommended: L3 - read closely` from the findings, risky payment/auth/security paths, a schema migration, a large diff and weak evidence (code changed, no test change), with the reasons named | Backlog item 10 (a recommended top-5): tells a human how closely to read at zero model cost, no extra pass, never blocking | 350 tests pass (`test_risktier` new, `test_pipeline` +2) |
 
 ## Review-grade output + precision (iteration 26)
 A review now reads like the hosted reviewers, without adding a service.
@@ -158,6 +159,18 @@ A review now reads like the hosted reviewers, without adding a service.
 - **The IDE hid known bugs behind prior recall.** With the store reachable the snippet path fed PR
   recall into the prompt, the model moved four real defects into an aside, and the panel scored the
   file `88/100` with one warning. The IDE now reviews the file as it is (`score 32`, 4 issues).
+
+## Risk tiers (iteration 29)
+The top of a review now says how closely a human should read, for free.
+
+- **Pure and advisory.** `risktier.tier(findings, files, secrets_flagged)` returns an `L0`-`L3`
+  level plus the reasons it was raised. No model, no extra pass, and it never blocks or changes
+  which passes run.
+- **Levels.** L1 is a small change with a test alongside it; L2 is a medium finding, a large diff,
+  or weak evidence (code changed, no test change); L3 is a high/blocker finding, a flagged secret,
+  a schema migration, or a payment/auth/security path. L0 renders nothing.
+- **Rendered** as one advisory line above the summary, reasons included; `risk_tiers: false`
+  removes it and blanks the tier.
 
 ## Pre-mortem and depth tiers (iteration 28)
 A risky diff gets one extra, bounded pass; an ordinary one does not pay for it.

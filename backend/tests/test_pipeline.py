@@ -1074,3 +1074,28 @@ async def test_depth_triggers_off_reports_no_tier(monkeypatch, db):
     assert res.premortem == []
 
 
+async def test_review_header_shows_an_advisory_risk_tier(monkeypatch, db):
+    monkeypatch.setattr(llm, "complete_json", _premortem_llm([]))
+    _patch_github(monkeypatch, [{"filename": "src/auth/login.py", "status": "added", "patch": AUTH_PATCH}])
+
+    res = await pipeline.review_pr("o", "r", 1, dry_run=True, db=db, rules=load_rules())
+
+    assert res.risk_tier == "L3"
+    md = pipeline.render_summary_md(res, load_rules())
+    assert "**Review depth recommended: L3**" in md
+    assert "read closely" in md
+
+
+async def test_risk_tiers_off_removes_the_advisory(monkeypatch, db):
+    monkeypatch.setattr(llm, "complete_json", _premortem_llm([]))
+    _patch_github(monkeypatch, [{"filename": "src/auth/login.py", "status": "added", "patch": AUTH_PATCH}])
+    rules = load_rules()
+    rules.risk_tiers = False
+
+    res = await pipeline.review_pr("o", "r", 1, dry_run=True, db=db, rules=rules)
+
+    assert res.risk_tier == ""
+    assert "Review depth recommended" not in pipeline.render_summary_md(res, rules)
+
+
+

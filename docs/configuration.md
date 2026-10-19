@@ -121,6 +121,11 @@ and `premortem` (default `true`) adds the bounded "what could break in productio
 tier. `depth_triggers: false` pins every PR to `quick`; the chosen tier is always named in the
 footer.
 
+One more key governs the advisory triage line (see
+[engine.md](engine.md#risk-tiers-how-closely-should-a-human-read)): `risk_tiers` (default `true`)
+prints `Review depth recommended: L0-L3` at the top of the comment from the findings, the diff
+size, whether tests changed, and risky paths. It is advisory only and never blocks.
+
 Two keys are where a human applies a learned suggestion (see
 [engine.md](engine.md#learning-from-feedback)): `ignore_paths:` takes globs for a scope the team
 keeps dismissing, and `focus:` takes the lens allow-list, so dropping a down-voted lens means

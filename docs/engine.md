@@ -415,6 +415,24 @@ spends one extra model call only where it is worth it:
 The section renders collapsed (`Pre-mortem: what could break in production`) under the
 walkthrough, and the count is disclosed in the footer (`pre-mortem: N scenario(s)`).
 
+## Risk tiers (how closely should a human read)
+
+The top of a review carries one advisory line: `Review depth recommended: L3 - read closely`. It
+is composed from signals the engine already has, so it costs nothing and can never contradict the
+findings below it. It is **advisory**: it never blocks and never decides which passes run (that is
+the depth tier above).
+
+- **L0** nothing to read (no code changed).
+- **L1** a small, low-risk change with a test change alongside it.
+- **L2** a medium-severity finding, a large diff (200+ added lines), or weak evidence (code
+  changed with no test change).
+- **L3** a high/blocker finding, a secret the scanner flagged, a schema migration, or a
+  payment/auth/security path.
+
+The reasons are printed with the line (for example `auth/security path: src/auth/login.py,
+weak evidence: code changed, no test change`). `risk_tiers: false` turns the line off; the tier is
+still computed for the API surface.
+
 ## Cost and disclosure
 
 Every consolidated review ends with a compact `Engine:` line: engine calls, failed calls,

@@ -51,6 +51,7 @@ user says **"final"**. Never print or commit the token.
 | `objects.py` | pure code-object units: `build_units` (group a file's added lines by enclosing changed symbol, `<file>` fallback), `symbol_for` (tag a finding with its unit), `unit_summary` (footer string) |
 | `walkthrough.py` | deterministic Change-Stack grouping: classify changed files into ordered chapters (schema→models→logic→api→ui→config→tests→docs), per-chapter notes; no model |
 | `premortem.py` | pure risk triggers + depth tier: `triggers` (whole-token path match + added-line volume), `tier` (`quick`/`deep`), `select` (keeps only scenarios anchored on an added line), `render_md`; no model |
+| `risktier.py` | pure advisory L0-L3 triage tier: `tier` (findings + risky paths + migration + large diff + weak evidence), `advisory`, `render_header_md`; no model, no extra pass |
 | `chat.py` | threaded `@buglens` commands: `parse_command` routing, `answer` (deterministic Change-Stack for `explain`, one bounded `complete_text` for `why`/`ask`), `handoff_prompts` Fix-All, `handle_command` posts an in-thread reply |
 | `github.py` | REST **and GraphQL**: PR files (paginated), file content, inline review, upsert comment, check runs (create/update/find with annotations), `closingIssuesReferences`, issue fetch, PR/commit history; **review-comment management**: `list_review_comments`, `reply_review_comment`, `update_review_comment`, `delete_review_comment`, `minimize_comment` (GraphQL, never raises) |
 | `store.py` | SQLite: run idempotency, findings, **file_cache**, **repo_index**/**file_prs** (code graph + file history), delivery dedupe, outcomes → suppression, **drops** (verifier rationale) and learned lens/dismissal stats, **posted_comments** (comment lifecycle ledger: fingerprint → path/line/comment_id/node_id/head_sha) |
@@ -108,6 +109,9 @@ Wiring: `routers/webhook.py` → `pipeline.review_pr`; `routers/review.py` → `
       deterministic `quick`/`deep` tier from whole-token path risk (new route, migration,
       auth/security path, large diff) and, on `deep`, renders 2-4 production failure scenarios
       each anchored to a real added line (the tier and count are named in the footer).
+      iteration 29 (Wave N) = advisory risk tiers: a pure `risktier.py` composes an L0-L3 triage
+      line (`Review depth recommended: L3 - read closely`) from findings, risky paths, a migration,
+      a large diff and weak evidence, at zero model cost; it is advisory and never blocks.
       **Full plan:
       `../temp/intel/buglens-v2-beat-plan-2026-10.md` (Waves A–J).** Inline reply chat shipped;
       multi-model consensus (second model) still open)*
@@ -264,6 +268,20 @@ identity. `POST /api/v1/feedback` and `/engine/stats?repo=` expect `owner/repo`.
   the prompt: the user asked about this file, now, and recall there demoted four real defects to a
   prose aside and scored the file clean. The PR bot keeps recall (it must not repeat itself across
   rounds); the IDE gets code-graph context only.
+
+## Risk tiers (iteration 29, do not regress)
+- **`risktier.py` is pure and free.** Findings + files in, `{level, reasons, advisory}` out. No
+  model, no I/O, no extra pass. It reuses `premortem.tokens` for whole-token path matching; do not
+  inline a second path matcher.
+- **Advisory, never blocking, never a depth switch.** The line names how closely a *human* should
+  read; the depth tier (`premortem`) decides which passes run. Never let the risk tier gate lenses,
+  the verify gate or the verdict.
+- **Severity is normalized first.** `blocker` -> L3, `major` -> L2 via `sev.normalize`; raw strings
+  like `high`/`medium` never match directly (`high` normalizes to `major`).
+- **L0 renders nothing.** `render_header_md("L0", ...)` returns `""`; the tier is still computed
+  for the API/dashboard.
+- **Reasons are named.** At most the first three are printed with the line; the full list stays on
+  `res.risk_reasons`. `risk_tiers: false` blanks the tier to `""` and drops the line.
 
 ## Pre-mortem and depth tiers (iteration 28, do not regress)
 - **`premortem.py` is pure.** Files in, tier/items/markdown out. No model, no I/O. The model call

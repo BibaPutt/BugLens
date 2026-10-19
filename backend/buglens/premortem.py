@@ -45,7 +45,7 @@ _TRIGGERS: tuple[dict, ...] = (
 )
 
 
-def _tokens(path: str) -> set[str]:
+def tokens(path: str) -> set[str]:
     """Word tokens of every path segment (`api/user_controller.py` -> {api, user, controller, py})."""
     out: set[str] = set()
     for seg in str(path).replace("\\", "/").split("/"):
@@ -70,7 +70,7 @@ def triggers(fds: list[FileDiff]) -> list[str]:
         for fd in fds:
             if allowed is not None and fd.status not in allowed:
                 continue
-            if _tokens(fd.path) & spec["tokens"]:
+            if tokens(fd.path) & spec["tokens"]:
                 fired.append(str(spec["name"]))
                 break
     return fired
