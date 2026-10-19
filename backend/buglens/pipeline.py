@@ -22,7 +22,7 @@ import uuid
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 
-from . import adapters, checks, github, indexer, integrations, learn, llm, objects, prodcontext, prompts, recall, secretscan, store, symbols, tickets, verify, walkthrough
+from . import adapters, checks, dedupe, github, indexer, integrations, learn, llm, objects, prodcontext, prompts, recall, secretscan, store, symbols, tickets, verify, walkthrough
 from . import lenses as L
 from .context import build_context, extract_symbols, language_of
 from .diff import FileDiff, DiffLine, ADD, choose_paths, parse_patch
@@ -38,6 +38,8 @@ REVIEWABLE_EXTS = {
 }
 MARKER = "<!-- buglens:v2 -->"
 MARKER_CAP = "<!-- buglens:round-cap -->"
+_CHECK_STATUS = {"pass": "✅ Pass", "warn": "⚠️ Warn", "info": "• Info"}
+STALE_REPLY = "BugLens: this finding is no longer present at {sha}. Marking the thread outdated."
 MAX_LENSES_PER_FILE = 3
 CONCURRENCY = 4
 RIPPLE_FETCH = 6          # related files whose bodies we fetch to build the symbol graph
@@ -72,7 +74,11 @@ class ReviewResult:
     converging: bool = False
     engine_notes: list[str] = field(default_factory=list)
     change_stack: list[dict] = field(default_factory=list)
-    pre_merge: list[str] = field(default_factory=list)
+    pre_merge: list[dict] = field(default_factory=list)
+    verdict_reason: str = ""
+    confidence: int = 0
+    merge_risk: str = ""
+    security_risk: str = ""
 
 
 # ── one file / one lens ───────────────────────────────────────────────────────
@@ -292,22 +298,33 @@ def _engine_notes(rules: Rules, verified, all_findings: list[dict],
     return notes
 
 
-def _dedupe(findings: list[dict]) -> list[dict]:
-    best: dict[str, dict] = {}
+def _reanchor_merge_findings(findings: list[dict],
+                             line_map: dict[int, tuple[str, int]]) -> list[dict]:
+    """Point a PR-level merge-lens finding back at the file line it actually quoted.
+
+    The merge lens reviews a shadow diff that copies every added line under a per-file
+    header, so its findings carry shadow line numbers. Mapping them back to the real
+    ``(path, line)`` lets semantic dedup collapse a merge finding that merely repeats a
+    file-lens finding, instead of counting the same defect twice. A finding anchored to a
+    shadow header line (or with no line at all) is a genuine PR-level concern and stays on
+    ``<pull-request>``.
+    """
+    out: list[dict] = []
     for f in findings:
-        key = f["fingerprint"]
-        cur = best.get(key)
-        if cur is None or sev.rank(f.get("severity")) < sev.rank(cur.get("severity")) or (
-            sev.rank(f.get("severity")) == sev.rank(cur.get("severity"))
-            and (f.get("confidence") or 0) > (cur.get("confidence") or 0)
-        ):
-            best[key] = f
-    return list(best.values())
+        if f.get("path") == "<pull-request>" and f.get("line"):
+            real = line_map.get(int(f["line"]))
+            if real:
+                f = dict(f)
+                f["path"], f["line"] = real
+        out.append(f)
+    return out
 
 
 # ── PR-level merge lens ───────────────────────────────────────────────────────
-def _pr_shadow(files: list[FileDiff], statuses: dict[str, str]) -> FileDiff:
+def _pr_shadow(files: list[FileDiff],
+               statuses: dict[str, str]) -> tuple[FileDiff, dict[int, tuple[str, int]]]:
     shadow = FileDiff(path="<pull-request>", language="plaintext")
+    line_map: dict[int, tuple[str, int]] = {}
     n = 0
     for fd in files:
         n += 1
@@ -315,13 +332,14 @@ def _pr_shadow(files: list[FileDiff], statuses: dict[str, str]) -> FileDiff:
         for l in fd.lines:
             if l.kind == ADD:
                 n += 1
+                line_map[n] = (fd.path, int(l.new_line))
                 shadow.lines.append(DiffLine(ADD, l.text, n, None, 0, n))
-    return shadow
+    return shadow, line_map
 
 
 async def _run_merge_lens(files: list[FileDiff], rules: Rules, pi: github.PRInfo | None,
                           statuses: dict[str, str]) -> tuple[list[dict], list[str], dict]:
-    shadow = _pr_shadow(files, statuses)
+    shadow = _pr_shadow(files, statuses)[0]
     body = _pr_digest(files, rules, pi, statuses)
     lens = L.MERGE
     user = prompts.build_review_prompt(shadow, lens, rules, context_block=body, related_block="")
@@ -358,7 +376,13 @@ def _pr_digest(files: list[FileDiff], rules: Rules, pi: github.PRInfo | None, st
 
 # ── summary ───────────────────────────────────────────────────────────────────
 async def _summarise(findings: list[dict], files: list[str], lenses_run: list[str],
-                     skipped: list[dict]) -> tuple[str, int, str, list[str], list[str], dict]:
+                     skipped: list[dict]) -> dict:
+    """One model call for the PR verdict, or an honest deterministic fallback.
+
+    Returns a dict: summary, score, verdict, highlights, positives, verdict_reason,
+    confidence, merge_risk, security_risk, usage. The risk axes and confidence are the
+    model's judgement over the verified findings and are labelled as such where rendered.
+    """
     digest = "\n".join(
         f"- [{sev.label(f.get('severity')).upper()}/{f.get('category')}] {f.get('path')}:{f.get('line')} {f.get('title')}"
         for f in findings
@@ -368,37 +392,85 @@ async def _summarise(findings: list[dict], files: list[str], lenses_run: list[st
         {"role": "user", "content": prompts.build_summary_prompt(digest, files, lenses_run, skipped)},
     ]
     fallback_score = sev.score_from_findings(findings)
+    has_blocker = any(sev.normalize(f.get("severity")) == "blocker" for f in findings)
     try:
         result = await llm.complete_json(messages, max_tokens=900)
         data = result.data
         summary = str(data.get("summary") or "").strip()
         score = int(data.get("score", fallback_score))
-        verdict = str(data.get("verdict") or ("blocking" if any(sev.normalize(f.get("severity")) == "blocker" for f in findings) else "looks-good"))
+        verdict = str(data.get("verdict") or ("blocking" if has_blocker else "looks-good"))
         highlights = [str(h) for h in (data.get("highlights") or [])][:5]
         positives = [str(p) for p in (data.get("positives") or [])][:5]
-        return summary, max(0, min(100, score)), verdict, highlights, positives, result.usage
+        return {
+            "summary": summary,
+            "score": max(0, min(100, score)),
+            "verdict": verdict,
+            "highlights": highlights,
+            "positives": positives,
+            "verdict_reason": str(data.get("verdict_reason") or "").strip()[:400],
+            "confidence": _clamp_pct(data.get("confidence")),
+            "merge_risk": _risk_level(data.get("merge_risk")),
+            "security_risk": _risk_level(data.get("security_risk")),
+            "usage": result.usage,
+        }
     except Exception:
-        verdict = "blocking" if any(sev.normalize(f.get("severity")) == "blocker" for f in findings) else (
-            "needs-attention" if findings else "looks-good"
-        )
+        verdict = "blocking" if has_blocker else ("needs-attention" if findings else "looks-good")
         summary = f"{len(findings)} finding(s) across {len(files)} file(s)."
-        return summary, fallback_score, verdict, [], [], {}
+        return {
+            "summary": summary,
+            "score": fallback_score,
+            "verdict": verdict,
+            "highlights": [],
+            "positives": [],
+            "verdict_reason": "",
+            "confidence": 0,
+            "merge_risk": "",
+            "security_risk": "",
+            "usage": {},
+        }
+
+
+_RISK_LEVELS = ("minimal", "none", "low", "medium", "high")
+
+
+def _risk_level(value) -> str:
+    text = str(value or "").strip().lower()
+    return text if text in _RISK_LEVELS else ""
+
+
+def _clamp_pct(value) -> int:
+    try:
+        return max(0, min(100, int(value)))
+    except (TypeError, ValueError):
+        return 0
 
 
 # ── rendering ─────────────────────────────────────────────────────────────────
 def render_finding_md(f: dict) -> str:
-    head = f"{sev.emoji(f.get('severity'))} **{sev.label(f.get('severity'))} · {f.get('category')}**, {f.get('title')}"
+    p = sev.priority(f.get("severity"))
+    head = (f"{sev.emoji(f.get('severity'))} **{p} · {sev.label(f.get('severity'))} · "
+            f"{f.get('category')}**, {f.get('title')}" if p else
+            f"{sev.emoji(f.get('severity'))} **{sev.label(f.get('severity'))} · {f.get('category')}**, {f.get('title')}")
     parts = [head]
-    if f.get("body"):
-        parts.append(f["body"])
     if f.get("evidence"):
         parts.append(f"```\n{str(f['evidence'])[:600]}\n```")
+    if f.get("body"):
+        parts.append(f["body"])
     if f.get("fix"):
         parts.append(f"**Suggested fix**\n\n{f['fix']}")
     if f.get("suggestion") and f.get("line"):
         # One-click apply: GitHub turns this into a "Commit suggestion" button.
         parts.append(f"```suggestion\n{f['suggestion']}\n```")
-    parts.append(f"<sub>lens: {f.get('lens')} · confidence: {f.get('confidence')}</sub>")
+    lenses = [str(x) for x in (f.get("lenses") or [])] or ([str(f.get("lens"))] if f.get("lens") else [])
+    foot = f"lens: {', '.join(lenses)} · confidence: {f.get('confidence')}"
+    parts.append(f"<sub>{foot}</sub>")
+    additional = f.get("additional") or []
+    if additional:
+        locs = ", ".join(
+            f"`{a.get('path')}:{a.get('line')}`" if a.get("line") else f"`{a.get('path')}`"
+            for a in additional[:5]
+        )
+        parts.append(f"<sub>also reported at {locs}</sub>")
     if f.get("fingerprint"):
         # Hidden marker: lets the reaction webhook map thumbs up/down straight back to this finding.
         parts.append(fingerprint_marker(f["fingerprint"]))
@@ -574,23 +646,35 @@ def _context_sources(tree: list[str], file_texts: dict[str, str], custom_lens_na
 
 
 def _pre_merge_checks(picked: list[FileDiff], ticket_summary: str, linters_run: list[str],
-                      secrets_flagged: bool, round_no: int, rules: Rules) -> list[str]:
-    """Deterministic pre-merge checklist. Asserts only what we actually know, never a guess."""
+                      secrets_flagged: bool, round_no: int, rules: Rules) -> list[dict]:
+    """Deterministic pre-merge checklist as table rows. Asserts only what we know, never a guess.
+
+    Each row is ``{"check", "status", "detail", "fix"}`` where status is pass | warn | info.
+    Only ``warn`` rows carry a fix hint, so the table never tells a human to do busywork.
+    """
     kinds = [walkthrough.classify(fd.path) for fd in picked]
     code = [k for k in kinds if k not in ("tests", "docs")]
     tests = kinds.count("tests")
-    checks: list[str] = []
+    checks: list[dict] = []
     if code and not tests:
-        checks.append("Tests: code changed, no test files touched")
+        checks.append({"check": "Tests", "status": "warn",
+                       "detail": "code changed, no test files touched",
+                       "fix": "add or update a test that covers the change"})
     elif tests:
-        checks.append(f"Tests: {tests} test file(s) updated")
+        checks.append({"check": "Tests", "status": "pass",
+                       "detail": f"{tests} test file(s) updated", "fix": ""})
+    else:
+        checks.append({"check": "Tests", "status": "info", "detail": "no code change to cover", "fix": ""})
     if getattr(rules, "check_ticket", True):
-        checks.append("Linked issue: linked" if ticket_summary else "Linked issue: none linked")
-    checks.append("Secrets: flagged" if secrets_flagged else "Secrets: none")
+        checks.append({"check": "Linked issue", "status": "pass" if ticket_summary else "info",
+                       "detail": ticket_summary or "none linked", "fix": ""})
+    checks.append({"check": "Secrets", "status": "warn" if secrets_flagged else "pass",
+                   "detail": "flagged by the scanner" if secrets_flagged else "none found",
+                   "fix": "rotate the value and load it from a secret store" if secrets_flagged else ""})
     if linters_run:
-        checks.append(f"Linters: {', '.join(linters_run)}")
+        checks.append({"check": "Linters", "status": "info", "detail": ", ".join(linters_run), "fix": ""})
     if round_no > 1:
-        checks.append(f"Re-review: round {round_no}")
+        checks.append({"check": "Re-review", "status": "info", "detail": f"round {round_no}", "fix": ""})
     return checks[:8]
 
 
@@ -612,8 +696,14 @@ def _walkthrough_md(res: ReviewResult, rules: Rules) -> list[str]:
         for ch in res.change_stack[:12]:
             lines.append(f"- **{ch['title']}** ({ch['note']})")
     if getattr(rules, "pre_merge_checks", True) and res.pre_merge:
-        lines += ["", "**Pre-merge checks:**"]
-        lines += [f"- {c}" for c in res.pre_merge]
+        lines += ["", "**Pre-merge checks:**", "", "| Check | Status | Detail |", "|---|---|---|"]
+        for c in res.pre_merge:
+            icon = _CHECK_STATUS.get(str(c.get("status")), "•")
+            detail = str(c.get("detail") or "")
+            fix = str(c.get("fix") or "")
+            if fix:
+                detail = f"{detail}. {fix}"
+            lines.append(f"| {c.get('check')} | {icon} | {detail} |")
     if res.context_sources:
         lines += ["", f"**Context used:** {', '.join(f'`{s}`' for s in res.context_sources)}"]
     lines += ["", "</details>"]
@@ -626,9 +716,25 @@ def render_summary_md(res: ReviewResult, rules: Rules) -> str:
         MARKER,
         f"## {icon} BugLens Review",
         f"**Score:** `{res.score}/100` · **Findings:** `{len(res.findings)}` · **Verdict:** `{res.verdict}`",
-        "",
-        res.summary or "",
     ]
+    meta: list[str] = []
+    if res.verdict_reason:
+        meta.append(f"_{res.verdict_reason}_")
+    if res.confidence:
+        meta.append(f"**Confidence:** `{res.confidence}/100`")
+    risks = []
+    if res.merge_risk:
+        risks.append(f"merge `{res.merge_risk}`")
+    if res.security_risk:
+        risks.append(f"security `{res.security_risk}`")
+    if risks:
+        meta.append("**Risk:** " + " · ".join(risks))
+    if res.head_sha:
+        meta.append(f"checked up to `{res.head_sha[:7]}`")
+    if meta:
+        lines.append("")
+        lines.append(" · ".join(meta))
+    lines += ["", res.summary or ""]
     lines += _walkthrough_md(res, rules)
     if res.highlights:
         lines += ["", "### Highlights"]
@@ -787,6 +893,11 @@ async def _review_pr(owner: str, repo: str, pr_number: int, *, base_sha: str | N
                     rules: Rules | None = None, force: bool = False) -> ReviewResult:
     await store.init(db)
     t0 = time.monotonic()
+    # Resolve the store path once. `db` is optional for callers, but every `if db` gate below
+    # decides whether persisted context is *used* (round counting, recall, suppression, the
+    # cross-push ledger). A webhook call passes none, so leaving it None silently disabled all
+    # of them in production while the tests, which always pass a path, stayed green.
+    db = db or store.db_path()
     # One canonical key for everything we persist: owner/repo. The bare repo name is
     # GitHub's URL param, not an identity (two orgs can both own a repo named "api").
     slug = repo if "/" in repo else f"{owner}/{repo}"
@@ -1074,12 +1185,14 @@ async def _review_pr(owner: str, repo: str, pr_number: int, *, base_sha: str | N
 
     files_by_path = {fd.path: fd for fd in picked}
     if picked:
-        files_by_path["<pull-request>"] = _pr_shadow(picked, statuses)
+        shadow, shadow_map = _pr_shadow(picked, statuses)
+        files_by_path["<pull-request>"] = shadow
+        all_findings = _reanchor_merge_findings(all_findings, shadow_map)
 
     # suppress fingerprints this team has repeatedly rejected
     rules._suppressed = await store.suppressed(slug, 2, db) if db else set()  # type: ignore[attr-defined]
 
-    all_findings = _dedupe(all_findings)
+    all_findings, duplicate_findings = dedupe.dedupe(all_findings)
     verified = await verify.verify_all(all_findings, files_by_path, rules)
 
     # Verifier rationale persistence: explain why candidates were dropped, not just how many.
@@ -1104,10 +1217,12 @@ async def _review_pr(owner: str, repo: str, pr_number: int, *, base_sha: str | N
     for f in kept:
         f["symbol"] = objects.symbol_for(f.get("path"), f.get("line"), units)
 
-    summary, score, verdict, highlights, s_positives, s_usage = await _summarise(
+    s = await _summarise(
         kept, [fd.path for fd in picked], sorted(lenses_run), skipped
     )
-    usage = _merge_usage(usage, s_usage)
+    summary, score, verdict = s["summary"], s["score"], s["verdict"]
+    highlights, s_positives = s["highlights"], s["positives"]
+    usage = _merge_usage(usage, s["usage"])
 
     # A review where every model call failed must not report itself as a clean pass. The
     # old behaviour posted "looks-good / 100" and the team merged on a review that never ran.
@@ -1135,7 +1250,7 @@ async def _review_pr(owner: str, repo: str, pr_number: int, *, base_sha: str | N
         status=res_status, summary=summary, score=score, verdict=verdict, findings=kept,
         positives=(positives + s_positives)[:6], highlights=highlights,
         files=[fd.path for fd in picked], skipped=skipped, lenses_run=sorted(lenses_run),
-        dropped=len(verified.dropped) + len(over_budget), model_used=llm.model_name(),
+        dropped=len(verified.dropped) + len(over_budget) + len(duplicate_findings), model_used=llm.model_name(),
         usage=usage, repo=repo, pr=pr_number, head_sha=head_sha, base_sha=base_sha,
         context_sources=_context_sources(tree, file_texts, custom_lens_names,
                                          graph_files=graph_files, ticket=bool(ticket_block),
@@ -1153,6 +1268,8 @@ async def _review_pr(owner: str, repo: str, pr_number: int, *, base_sha: str | N
         change_stack=walkthrough.build_change_stack(picked, kept),
         pre_merge=_pre_merge_checks(picked, ticket_summary, linters_run,
                                     "secrets" in lenses_run, round_no, rules),
+        verdict_reason=s["verdict_reason"], confidence=s["confidence"],
+        merge_risk=s["merge_risk"], security_risk=s["security_risk"],
     )
 
     try:                                   # findings are best-effort; never cost the review
@@ -1163,10 +1280,14 @@ async def _review_pr(owner: str, repo: str, pr_number: int, *, base_sha: str | N
     obj_note = objects.unit_summary(units)
     if obj_note:
         res.engine_notes.append(f"code objects: {obj_note}")
+    if duplicate_findings:
+        res.engine_notes.append(f"merged {len(duplicate_findings)} duplicate finding(s)")
     for lens in sorted(cap_counts):
         res.engine_notes.append(f"lens caps: {lens} {cap_counts[lens]}")
     if prod_used:
         res.engine_notes.append(f"external context: {', '.join(sorted(set(prod_used)))}")
+    if not (res.verdict_reason or res.confidence or res.merge_risk or res.security_risk):
+        res.engine_notes.append("verdict meta: not provided by the model")
 
     if db:                                 # ledger of what this round actually reviewed
         try:
@@ -1193,7 +1314,14 @@ async def _review_pr(owner: str, repo: str, pr_number: int, *, base_sha: str | N
         await store.finish_run(run_id, verdict, score, len(kept), False, db)
         return res
 
-    res.posted = await _post(owner, repo, pr_number, head_sha, res, rules)
+    acknowledged, retired = await _reconcile_prior_comments(owner, repo, pr_number, head_sha,
+                                                            res, rules, db)
+    if acknowledged:
+        res.engine_notes.append(f"addressed findings acknowledged: {acknowledged}")
+    if retired:
+        res.engine_notes.append(f"stale comments retired: {retired}")
+
+    res.posted = await _post(owner, repo, pr_number, head_sha, res, rules, db)
     if res.posted:
         await store.mark_posted(run_id, db)
     if rules.post_check_run and head_sha:
@@ -1274,7 +1402,8 @@ async def _publish_lens_checks(owner: str, repo: str, head_sha: str, res: Review
     return published
 
 
-async def _post(owner: str, repo: str, pr_number: int, head_sha: str, res: ReviewResult, rules: Rules) -> bool:
+async def _post(owner: str, repo: str, pr_number: int, head_sha: str, res: ReviewResult,
+                rules: Rules, db: str | None = None) -> bool:
     inline = []
     if not rules.summary_only:
         for f in res.findings:
@@ -1289,8 +1418,9 @@ async def _post(owner: str, repo: str, pr_number: int, head_sha: str, res: Revie
     event = "REQUEST_CHANGES" if (getattr(rules, "request_changes", False) and res.verdict == "blocking") else "COMMENT"
     try:
         if inline or event != "COMMENT":
-            await github.post_review(owner, repo, pr_number, head_sha, render_summary_md(res, rules),
-                                     inline, event=event)
+            review = await github.post_review(owner, repo, pr_number, head_sha,
+                                              render_summary_md(res, rules), inline, event=event)
+            await _record_posted_comments(owner, repo, pr_number, res, review, db)
             return True
         await github.upsert_marked_comment(owner, repo, pr_number, MARKER, render_summary_md(res, rules))
         return True
@@ -1300,6 +1430,117 @@ async def _post(owner: str, repo: str, pr_number: int, head_sha: str, res: Revie
             return True
         except Exception:
             return False
+
+
+async def _record_posted_comments(owner: str, repo: str, pr_number: int, res: ReviewResult,
+                                  review: dict | None, db: str | None) -> None:
+    """Persist which inline comment id belongs to which finding fingerprint.
+
+    The id is what a later push needs to retire or answer a stale thread. Strictly best-effort:
+    the review is already posted, so nothing here may raise.
+    """
+    # `db` is optional everywhere in this module: a webhook call passes none and the store
+    # falls back to BUGLENS_DB. Never gate on it here, that silently disabled the ledger.
+    if not res.findings or not isinstance(review, dict) or not review.get("id"):
+        return
+    try:
+        comments = await github.list_review_comments(owner, repo, pr_number, int(review["id"]))
+        by_fp: dict[str, dict] = {}
+        for c in comments:
+            fp = extract_fingerprint(c.get("body") or "")
+            if fp:
+                by_fp[fp] = c
+        items = []
+        for f in res.findings:
+            c = by_fp.get(f.get("fingerprint") or "")
+            if not c:
+                continue
+            items.append({
+                "fingerprint": f["fingerprint"], "path": f.get("path"), "line": f.get("line"),
+                "comment_id": c.get("id"), "node_id": c.get("node_id"),
+            })
+        if items:
+            await store.save_posted_comments(f"{owner}/{repo}", pr_number, res.head_sha, items, db)
+    except Exception:
+        pass
+
+
+MAX_RECONCILE = 12
+
+
+async def _reconcile_prior_comments(owner: str, repo: str, pr_number: int, head_sha: str,
+                                    res: ReviewResult, rules: Rules,
+                                    db: str | None) -> tuple[int, int]:
+    """Close the loop on older comments a new push made stale.
+
+    Returns ``(acknowledged, retired)``. A comment whose finding is still open is left alone.
+    A comment whose finding is gone is only *acknowledged* when the quoted evidence is really
+    absent at the new head (the same rule ``measure_resolution`` uses), otherwise it is
+    collapsed as outdated when the operator opted in. Best-effort: any failure here contributes
+    nothing and never fails the review.
+    """
+    if not head_sha or not github.configured():
+        return (0, 0)
+    slug = f"{owner}/{repo}"
+    try:
+        prior = await store.posted_comments(slug, pr_number, db)
+    except Exception:
+        return (0, 0)
+    if not prior:
+        return (0, 0)
+    current = {f.get("fingerprint") for f in res.findings}
+    stale = [row for row in prior if row.get("fingerprint") not in current]
+    if not stale:
+        return (0, 0)
+    try:
+        known = {f.get("fingerprint"): f for f in await store.findings_for_pr(slug, pr_number, db)}
+    except Exception:
+        known = {}
+    acknowledged = retired = 0
+    cache: dict[str, str | None] = {}
+    failed: set[str] = set()
+    for row in stale[:MAX_RECONCILE]:
+        src = known.get(row.get("fingerprint")) or {}
+        path = row.get("path") or src.get("path") or ""
+        evidence = str(src.get("evidence") or "")
+        if not path:
+            continue
+        if path not in cache and path not in failed:
+            try:
+                cache[path] = await github.get_file_content(owner, repo, path, head_sha)
+            except Exception:
+                failed.add(path)
+        if path in failed:
+            continue
+        # Only a finding whose evidence is really gone may be touched. A finding that is
+        # merely absent from this round (budget, dedup, a quieter lens) is still open, and
+        # collapsing it would hide a real problem. Never guess from a failed fetch.
+        if not _evidence_gone(cache.get(path), evidence):
+            continue
+        if row.get("comment_id") and getattr(rules, "acknowledge_resolved", True):
+            try:
+                await github.reply_review_comment(owner, repo, pr_number, int(row["comment_id"]),
+                                                  STALE_REPLY.format(sha=head_sha[:7]))
+                acknowledged += 1
+                await store.forget_posted_comment(slug, pr_number, row["fingerprint"], db)
+                continue
+            except Exception:
+                pass
+        if not getattr(rules, "stale_comments", True) or not row.get("node_id"):
+            continue
+        try:
+            if await github.minimize_comment(row["node_id"]):
+                retired += 1
+                await store.forget_posted_comment(slug, pr_number, row["fingerprint"], db)
+        except Exception:
+            pass
+    return (acknowledged, retired)
+
+
+def _evidence_gone(text: str | None, evidence: str) -> bool:
+    """The one rule for "was this fixed": the file is gone, or the quoted evidence is gone."""
+    ev = (evidence or "").strip()
+    return text is None or (bool(ev) and ev not in text)
 
 
 def convention_paths(tree: list[str]) -> list[str]:
@@ -1356,10 +1597,10 @@ async def review_snippet(code: str, language: str, filename: str = "snippet",
     rules = rules or load_rules()
     if focus:
         rules.focus = focus
+    db = db or store.db_path()
     t0 = time.monotonic()
     fd = _snippet_to_filediff(code, language, filename)
 
-    context_block = ""
     related_block = ""
     if repo and db:
         try:
@@ -1373,26 +1614,26 @@ async def review_snippet(code: str, language: str, filename: str = "snippet",
             )
             if imports:
                 related_block = "Declared imports: " + ", ".join(imports[:20]) + "\n\n" + related_block
-            recall_text = await recall.recall_block(repo, [fd.path], db)
-            if recall_text:
-                context_block = recall_text
         except Exception:
-            context_block = related_block = ""
+            related_block = ""
 
     lenses = L.select_lenses(fd.path, language, rules.focus)
     sem = asyncio.Semaphore(CONCURRENCY)
+    # The IDE asks about this file, now. Prior-review recall belongs to the PR bot, which must
+    # not repeat itself across rounds; wired in here it quietly demoted known bugs to a prose
+    # aside and the panel showed a clean score for a file full of them.
     findings, positives, usage, names = await _review_file(
-        fd, lenses, rules, context_block, related_block, [], sem
+        fd, lenses, rules, "", related_block, [], sem
     )
     lint_findings, linters_run = adapters.scan({fd.path: code}, {fd.path: fd}, getattr(rules, "linters", []))
     if lint_findings:
         findings.extend(lint_findings)
         names = [*names, "lint"]
-    findings = _dedupe(findings)
+    findings, duplicate_findings = dedupe.dedupe(findings)
     verified = await verify.verify_all(findings, {fd.path: fd}, rules)
     kept, over = sev.budget(verified.kept, rules.max_comments, rules.min_severity)
-    summary, score, verdict, highlights, s_pos, s_usage = await _summarise(kept, [fd.path], names, [])
-    merged = _merge_usage(usage, s_usage)
+    s = await _summarise(kept, [fd.path], names, [])
+    merged = _merge_usage(usage, s["usage"])
     calls, failures = _lens_health(merged)
     if calls and failures >= calls:          # IDE: say so instead of showing a 100/100
         return ReviewResult(
@@ -1402,13 +1643,15 @@ async def review_snippet(code: str, language: str, filename: str = "snippet",
             wall_seconds=time.monotonic() - t0,
         )
     return ReviewResult(
-        status="ok", summary=summary, score=score, verdict=verdict, findings=kept,
-        positives=(positives + s_pos)[:6], highlights=highlights, files=[fd.path],
-        lenses_run=names, dropped=len(verified.dropped) + len(over),
+        status="ok", summary=s["summary"], score=s["score"], verdict=s["verdict"], findings=kept,
+        positives=(positives + s["positives"])[:6], highlights=s["highlights"], files=[fd.path],
+        lenses_run=names, dropped=len(verified.dropped) + len(over) + len(duplicate_findings),
         model_used=llm.model_name(), usage=merged,
         review_effort=_review_effort([fd]),
         wall_seconds=time.monotonic() - t0,
-        engine_notes=_engine_notes(rules, verified, findings, False, 0, bool(related_block),
+        verdict_reason=s["verdict_reason"], confidence=s["confidence"],
+        merge_risk=s["merge_risk"], security_risk=s["security_risk"],
+        engine_notes=_engine_notes(rules, verified, findings, False, 0, False,
                                    calls, failures, False, linters_run=linters_run),
     )
 
@@ -1462,7 +1705,7 @@ async def measure_resolution(owner: str, repo: str, pr_number: int, head_sha: st
             cache[path] = await github.get_file_content(owner, repo, path, head_sha) if github.configured() else None
         text = cache[path]
         evidence = (finding.get("evidence") or "").strip()
-        if text is None or (evidence and evidence not in text):
+        if _evidence_gone(text, evidence):
             await store.record_outcome(slug, finding["fingerprint"], "resolved", finding.get("title") or "", db)
             resolved += 1
         else:

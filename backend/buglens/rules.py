@@ -42,6 +42,8 @@ DEFAULTS = {
     "check_ticket": True,
     "pre_merge_checks": True,
     "request_changes": False,
+    "stale_comments": True,
+    "acknowledge_resolved": True,
     "max_rounds": 10,
     "converge_rounds": 3,
     "external_context": [],
@@ -74,6 +76,8 @@ class Rules:
     check_ticket: bool = True
     pre_merge_checks: bool = True        # deterministic pre-merge checklist in the walkthrough
     request_changes: bool = False        # opt-in: post REQUEST_CHANGES when the verdict is blocking
+    stale_comments: bool = True          # collapse a prior finding's comment when a push made it stale
+    acknowledge_resolved: bool = True    # reply on the thread when a push fixed a prior finding
     max_rounds: int = 10                 # 0 disables the re-review cap
     converge_rounds: int = 3             # from round N+1 only code new since a prior round
     ignore_paths: list[str] = field(default_factory=list)
@@ -338,6 +342,8 @@ def describe(rules: Rules) -> dict:
         "skip_nits": rules.skip_nits,
         "pre_merge_checks": rules.pre_merge_checks,
         "request_changes": rules.request_changes,
+        "stale_comments": rules.stale_comments,
+        "acknowledge_resolved": rules.acknowledge_resolved,
         "max_rounds": rules.max_rounds,
         "converge_rounds": rules.converge_rounds,
         "linters": rules.linters,

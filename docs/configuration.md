@@ -103,10 +103,16 @@ reviews after that many rounds (deterministic: a file is only re-reviewed if its
 changed). Set either to `0` to disable it.
 
 Two keys govern the summary body and merge behaviour: `pre_merge_checks` (default `true`) adds
-a deterministic checklist to the walkthrough (tests moved, issue linked, secrets, linters), and
-`request_changes` (default `false`) is the only way BugLens can ever post a blocking review. It
-posts `REQUEST_CHANGES` **only** when the verdict is `blocking` (a blocker-severity finding);
-off, every review is `event=COMMENT`.
+a deterministic table to the walkthrough (tests moved, issue linked, secrets, linters) with a
+status and a fix per row, and `request_changes` (default `false`) is the only way BugLens can
+ever post a blocking review. It posts `REQUEST_CHANGES` **only** when the verdict is `blocking`
+(a blocker-severity finding); off, every review is `event=COMMENT`.
+
+Two keys govern what happens to inline comments from earlier rounds (see
+[engine.md](engine.md#comment-lifecycle)): `acknowledge_resolved` (default `true`) replies on the
+thread and names the commit when a push fixes the finding, and `stale_comments` (default `true`)
+collapses a confirmed-gone finding's comment as outdated. Both act only when the quoted evidence
+is verifiably absent from the new head; a still-open finding is never touched.
 
 Two keys are where a human applies a learned suggestion (see
 [engine.md](engine.md#learning-from-feedback)): `ignore_paths:` takes globs for a scope the team

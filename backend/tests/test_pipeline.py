@@ -54,6 +54,8 @@ def _patch_github(monkeypatch, files, *, capture=None):
     async def no_issues(*a, **k):
         return []
 
+    monkeypatch.setattr(github, "list_review_comments", no_issues)
+
     monkeypatch.setattr(github, "get_pr", get_pr)
     monkeypatch.setattr(github, "get_pr_files", get_pr_files)
     monkeypatch.setattr(github, "get_repo_tree", get_tree)
@@ -109,7 +111,8 @@ async def test_walkthrough_renders_change_stack_and_pre_merge(monkeypatch, db):
     assert "Change stack" in md
     assert "**Core logic**" in md
     assert "Pre-merge checks" in md
-    assert "Secrets: none" in md
+    assert "| Check | Status | Detail |" in md
+    assert "| Secrets |" in md
 
     rules = load_rules()
     rules.pre_merge_checks = False

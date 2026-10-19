@@ -381,3 +381,99 @@ async def pulls_for_commit(owner: str, repo: str, sha: str) -> list[dict]:
         return []
     return [{"number": p.get("number"), "title": p.get("title") or "",
              "merged_at": p.get("merged_at")} for p in resp.json()]
+
+
+async def list_review_comments(owner: str, repo: str, number: int, review_id: int,
+                               limit: int = 100) -> list[dict]:
+    """Inline comments belonging to one posted review.
+
+    `GET /repos/{owner}/{repo}/pulls/{number}/comments` returns every review comment on
+    the PR across all reviews, so we page through and keep only the items whose
+    `pull_request_review_id` matches. Each kept item carries `id`, `node_id`, `path`,
+    `line`, `body`. Raises GitHubError on non-2xx.
+    """
+    out: list[dict] = []
+    page = 1
+    while len(out) < limit and page <= MAX_PAGES:
+        resp = await _request("GET", f"{API}/repos/{owner}/{repo}/pulls/{number}/comments",
+                              params={"per_page": 100, "page": page})
+        if resp.status_code != 200:
+            raise GitHubError(f"list_review_comments {resp.status_code}: {resp.text[:300]}")
+        batch = resp.json()
+        if not batch:
+            break
+        for c in batch:
+            if c.get("pull_request_review_id") == review_id:
+                out.append(c)
+        if len(batch) < 100:
+            break
+        page += 1
+    return out[:limit]
+
+
+async def reply_review_comment(owner: str, repo: str, number: int, comment_id: int,
+                               body: str) -> dict:
+    """Reply inside an existing review-comment thread.
+
+    GitHub replies to a review comment through a dedicated `/replies` sub-resource, not
+    the ordinary comment endpoint used for edits, so this path differs from
+    `update_review_comment`. Raises GitHubError on non-2xx.
+    """
+    resp = await _request(
+        "POST", f"{API}/repos/{owner}/{repo}/pulls/{number}/comments/{comment_id}/replies",
+        json={"body": body},
+    )
+    if resp.status_code not in (200, 201):
+        raise GitHubError(f"reply_review_comment {resp.status_code}: {resp.text[:300]}")
+    return resp.json()
+
+
+async def update_review_comment(owner: str, repo: str, comment_id: int, body: str) -> dict:
+    """Rewrite the body of an existing review comment.
+
+    Editing a review comment targets the flat `/pulls/comments/{comment_id}` resource
+    (no PR number, no `/replies`). Raises GitHubError on non-2xx.
+    """
+    resp = await _request("PATCH", f"{API}/repos/{owner}/{repo}/pulls/comments/{comment_id}",
+                          json={"body": body})
+    if resp.status_code != 200:
+        raise GitHubError(f"update_review_comment {resp.status_code}: {resp.text[:300]}")
+    return resp.json()
+
+
+async def delete_review_comment(owner: str, repo: str, comment_id: int) -> bool:
+    """Delete our own review comment.
+
+    Returns True on 204 (deleted), False on 404 (already gone, deleting twice is fine),
+    and raises GitHubError on any other non-2xx.
+    """
+    resp = await _request("DELETE", f"{API}/repos/{owner}/{repo}/pulls/comments/{comment_id}")
+    if resp.status_code == 204:
+        return True
+    if resp.status_code == 404:
+        return False
+    raise GitHubError(f"delete_review_comment {resp.status_code}: {resp.text[:300]}")
+
+
+_MINIMIZE_MUTATION = """
+mutation($id: ID!, $classifier: ReportedContentClassifiers!) {
+  minimizeComment(input: {subjectId: $id, classifier: $classifier}) {
+    minimizedComment { isMinimized }
+  }
+}
+"""
+
+
+async def minimize_comment(node_id: str, classifier: str = "OUTDATED") -> bool:
+    """GraphQL minimizeComment: how a stale thread is collapsed.
+
+    Best-effort only. GraphQL is the only API that exposes minimizeComment, and a
+    failure here must never fail a review, so every exception and any GraphQL "errors"
+    payload returns False instead of raising.
+    """
+    try:
+        data = await graphql(_MINIMIZE_MUTATION, {"id": node_id, "classifier": classifier})
+        node = (data.get("minimizeComment") or {}).get("minimizedComment") or {}
+        return bool(node.get("isMinimized"))
+    except Exception:
+        return False

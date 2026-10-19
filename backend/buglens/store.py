@@ -157,6 +157,18 @@ CREATE TABLE IF NOT EXISTS drops (
     created_at TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_drops_repo ON drops(repo);
+CREATE TABLE IF NOT EXISTS posted_comments (
+    repo        TEXT NOT NULL,
+    pr          INTEGER NOT NULL,
+    fingerprint TEXT NOT NULL,
+    path        TEXT,
+    line        INTEGER,
+    comment_id  TEXT,
+    node_id     TEXT,
+    head_sha    TEXT,
+    created_at  TEXT NOT NULL,
+    PRIMARY KEY (repo, pr, fingerprint)
+);
 """
 
 
@@ -772,3 +784,63 @@ async def drop_stats(repo: str, path: str | None = None) -> dict[str, int]:
             "SELECT reason, COUNT(*) FROM drops WHERE repo=? GROUP BY reason", (repo,)
         )).fetchall()
     return {r[0] or "unknown": int(r[1]) for r in rows}
+
+
+async def save_posted_comments(repo: str, pr: int, head_sha: str,
+                               items: list[dict], path: str | None = None) -> None:
+    """Upsert the inline comment posted for each finding fingerprint on this PR.
+
+    The ledger maps a finding fingerprint to the GitHub comment id/node id we created
+    for it, so a later push can retire or reply to a stale comment. Items without a
+    fingerprint are skipped. A repeat fingerprint updates the tracked fields in place,
+    so one row per (repo, pr, fingerprint) is kept.
+    """
+    path = path or db_path()
+    now = _now()
+    rows = []
+    for item in items:
+        fingerprint = item.get("fingerprint")
+        if not fingerprint:
+            continue
+        comment_id = item.get("comment_id")
+        rows.append((
+            repo, pr, fingerprint, item.get("path"), item.get("line"),
+            None if comment_id is None else str(comment_id), item.get("node_id"), head_sha, now,
+        ))
+    if not rows:
+        return
+    async with _open(path) as db:
+        await db.executemany(
+            "INSERT INTO posted_comments "
+            "(repo, pr, fingerprint, path, line, comment_id, node_id, head_sha, created_at)"
+            " VALUES (?,?,?,?,?,?,?,?,?)"
+            " ON CONFLICT(repo, pr, fingerprint) DO UPDATE SET"
+            " path=excluded.path, line=excluded.line, comment_id=excluded.comment_id,"
+            " node_id=excluded.node_id, head_sha=excluded.head_sha, created_at=excluded.created_at",
+            rows,
+        )
+        await db.commit()
+
+
+async def posted_comments(repo: str, pr: int, path: str | None = None) -> list[dict]:
+    """Inline comments posted on this (repo, pr), oldest first, as row dicts."""
+    path = path or db_path()
+    async with _open(path) as db:
+        rows = await (await db.execute(
+            "SELECT fingerprint, path, line, comment_id, node_id, head_sha, created_at"
+            " FROM posted_comments WHERE repo=? AND pr=? ORDER BY created_at ASC", (repo, pr)
+        )).fetchall()
+    keys = ("fingerprint", "path", "line", "comment_id", "node_id", "head_sha", "created_at")
+    return [dict(zip(keys, row)) for row in rows]
+
+
+async def forget_posted_comment(repo: str, pr: int, fingerprint: str,
+                                path: str | None = None) -> None:
+    """Drop the ledger row for (repo, pr, fingerprint). Absent rows are a silent no-op."""
+    path = path or db_path()
+    async with _open(path) as db:
+        await db.execute(
+            "DELETE FROM posted_comments WHERE repo=? AND pr=? AND fingerprint=?",
+            (repo, pr, fingerprint),
+        )
+        await db.commit()

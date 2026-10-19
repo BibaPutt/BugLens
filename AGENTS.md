@@ -30,7 +30,8 @@ user says **"final"**. Never print or commit the token.
 | file | job |
 |---|---|
 | `diff.py` | parse unified diff, map to **new-file** line numbers, join added text, fingerprints |
-| `severity.py` | severity taxonomy (blocker/high/medium/low/info), ranking, comment budget |
+| `severity.py` | severity taxonomy (blocker/high/medium/low/info), ranking, comment budget, `priority()` → P1/P2/P3 |
+| `dedupe.py` | pure precision pass: `normalize_evidence`/`defect_key`/`dedupe` collapse the same defect raised by several lenses into one finding (kept finding gains `lenses` + `additional` locations) |
 | `rules.py` | load `.buglens.yml` (layered: root → nested, nearest wins), ignore paths, budget, severity floor, focus, instruction files |
 | `context.py` | cheap repo index (tree, imports, symbols, conventions) |
 | `lenses.py` | the experts: correctness, security, performance, ui, tests, maintainability + PR-level `merge` |
@@ -50,8 +51,8 @@ user says **"final"**. Never print or commit the token.
 | `objects.py` | pure code-object units: `build_units` (group a file's added lines by enclosing changed symbol, `<file>` fallback), `symbol_for` (tag a finding with its unit), `unit_summary` (footer string) |
 | `walkthrough.py` | deterministic Change-Stack grouping: classify changed files into ordered chapters (schema→models→logic→api→ui→config→tests→docs), per-chapter notes; no model |
 | `chat.py` | threaded `@buglens` commands: `parse_command` routing, `answer` (deterministic Change-Stack for `explain`, one bounded `complete_text` for `why`/`ask`), `handoff_prompts` Fix-All, `handle_command` posts an in-thread reply |
-| `github.py` | REST **and GraphQL**: PR files (paginated), file content, inline review, upsert comment, check runs (create/update/find with annotations), `closingIssuesReferences`, issue fetch, PR/commit history |
-| `store.py` | SQLite: run idempotency, findings, **file_cache**, **repo_index**/**file_prs** (code graph + file history), delivery dedupe, outcomes → suppression, **drops** (verifier rationale) and learned lens/dismissal stats |
+| `github.py` | REST **and GraphQL**: PR files (paginated), file content, inline review, upsert comment, check runs (create/update/find with annotations), `closingIssuesReferences`, issue fetch, PR/commit history; **review-comment management**: `list_review_comments`, `reply_review_comment`, `update_review_comment`, `delete_review_comment`, `minimize_comment` (GraphQL, never raises) |
+| `store.py` | SQLite: run idempotency, findings, **file_cache**, **repo_index**/**file_prs** (code graph + file history), delivery dedupe, outcomes → suppression, **drops** (verifier rationale) and learned lens/dismissal stats, **posted_comments** (comment lifecycle ledger: fingerprint → path/line/comment_id/node_id/head_sha) |
 | `pipeline.py` | orchestration + `review_pr()` / `review_snippet()` |
 | `mcp_server.py` | local MCP server over stdio (JSON-RPC 2.0, stdlib only): `list_tools`/`call_tool`/`handle`/`serve`/`main`; six read-only tools, `review` dry-run by default |
 
@@ -93,6 +94,11 @@ Wiring: `routers/webhook.py` → `pipeline.review_pr`; `routers/review.py` → `
       Jira/Linear/Sentry/Datadog/PostHog, off by default, fail-soft); iteration 25 (Wave J) =
       local MCP server (`mcp_server.py`, stdlib-only JSON-RPC over stdio, six read-only tools,
       `review` dry-run by default). Wave I (runtime proof) was skipped on user instruction.
+      iteration 26 (Wave K) = review-grade output + precision: verdict-reason/confidence/merge-risk/
+      security-risk header scoped to a commit, P1/P2/P3 priority labels, evidence-first finding
+      bodies with a lens list and additional locations, pre-merge checks as a status+fix table,
+      cross-lens semantic dedup (`dedupe.py`), and inline-comment lifecycle (acknowledge resolved,
+      collapse only confirmed-gone findings) over a `posted_comments` ledger.
       **Full plan:
       `../temp/intel/buglens-v2-beat-plan-2026-10.md` (Waves A–J).** Inline reply chat shipped;
       multi-model consensus (second model) still open)*
@@ -141,6 +147,13 @@ identity. `POST /api/v1/feedback` and `/engine/stats?repo=` expect `owner/repo`.
   `(index, graph)` keyed by `(db, slug, store.index_version(...))`. The version is a write
   counter bumped by every index write. **Never** re-key it on a timestamp or row count
   (second-resolution timestamps and same-count updates both produced stale caches).
+- **`db` is resolved, not required.** `_review_pr` and `review_snippet` start with
+  `db = db or store.db_path()`. Every `if db` gate below decides whether persisted context is
+  *used* (round counting, recall, suppression, cross-push dedupe, ripple fetch, drop rationales,
+  the round-file ledger). Callers may omit it, but never leave the resolved value None: the
+  webhook path passes nothing, so a raw `if db` silently disabled all of those in production
+  while the tests, which always pass a path, stayed green. The same trap applies to any new
+  helper: do not gate store work on the caller's argument.
 
 ## Reliability rules (iteration 15, do not regress)
 - **A review that could not run must never look clean.** Lens calls count `calls`/`errors`
@@ -207,6 +220,41 @@ identity. `POST /api/v1/feedback` and `/engine/stats?repo=` expect `owner/repo`.
   `-32602`, unparseable line → `-32700`, internal failure → `-32603`; a notification (no `id`)
   returns nothing. Never silently drop a request.
 - Docs for client wiring live in `docs/operations.md` (`## MCP server`); keep them in step.
+
+## Review-grade output + comment lifecycle (iteration 26, do not regress)
+- **`dedupe.py` is pure.** `normalize_evidence` collapses whitespace only; `defect_key` is
+  evidence-hash first, then `path|line|category`, then `path|title`; `dedupe` returns
+  `(kept, dropped)` and **never mutates** its input. The kept finding gains `lenses` (sorted
+  distinct) and `additional` (other `{path,line}`). Never merge findings that share only a title:
+  that is how two different bugs become one invisible comment. Dedup runs **after** the verify
+  gate and **after** merge-lens re-anchoring, so a merge finding is deduped against its real line.
+- **A merge finding is re-anchored, never guessed.** `_pr_shadow` returns `(shadow, line_map)`;
+  `_reanchor_merge_findings` maps a `<pull-request>` anchor back to the `(path, line)` it came
+  from. A PR-level finding with no mapped line stays PR-level.
+- **The header is evidence, not decoration.** `_summarise` returns a dict carrying
+  `verdict_reason`, `confidence` (clamped 0–100), `merge_risk`, `security_risk`; the prompt says
+  the reason must cite the findings and the risks must follow them. Missing keys degrade to empty,
+  never to an invented number. The header also names `checked up to <sha7>`.
+- **Priority labels are derived, not stored.** `severity.priority` maps the normalized severity;
+  the finding body shows `P1 · Blocker · <category>`. Never persist a P-label.
+- **Pre-merge checks are rows, not strings.** `_pre_merge_checks` returns
+  `{"check","status","detail","fix"}` and the walkthrough renders them as a table. Still
+  informational, still gated by `rules.pre_merge_checks`, still never blocking.
+- **A comment is only ever touched when its evidence is verifiably gone.**
+  `_reconcile_prior_comments` reads the `posted_comments` ledger, fetches the new file, and:
+  replies `fixed in <sha7>` and forgets the row when `rules.acknowledge_resolved` (default true);
+  collapses via `minimize_comment(OUTDATED)` and forgets the row when `rules.stale_comments`
+  (default true). **A finding that is merely absent from this round is still open and is left
+  alone**, and a failed fetch is unknown, never resolved. Never retract or collapse on a guess.
+  It runs **before** `_post` so its notes render, and `_post` records what it posted.
+- **Name it in the footer.** `merged N duplicate finding(s)`, `addressed findings acknowledged: N`,
+  `stale comments retired: N` (iteration-16 "name every depth change" rule). When the summary call
+  returns none of `verdict_reason`/`confidence`/`merge_risk`/`security_risk`, append
+  `verdict meta: not provided by the model`. Never invent a value to fill the header.
+- **The IDE path is not the PR path.** `review_snippet` must not inject prior-review recall into
+  the prompt: the user asked about this file, now, and recall there demoted four real defects to a
+  prose aside and scored the file clean. The PR bot keeps recall (it must not repeat itself across
+  rounds); the IDE gets code-graph context only.
 
 ## Code objects and per-lens caps (iteration 23, do not regress)
 - **`objects.py` is pure and deterministic.** `build_units` reuses `symbols.changed_defs` (it does

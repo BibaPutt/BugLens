@@ -89,6 +89,20 @@ def emoji(sev: str | None) -> str:
     return EMOJI.get(normalize(sev), "🟡")
 
 
+# The priority label every reviewer already reads (Greptile/CodeRabbit use P1/P2/P3).
+# Nits deliberately have none, so a style remark is never dressed up as a priority.
+PRIORITY = {"blocker": "P1", "major": "P2", "minor": "P3"}
+
+
+def priority(sev: str | None) -> str | None:
+    """P1/P2/P3 for blocker/major/minor, None for a nit.
+
+    An unknown string normalizes to `minor` first, so it reads as P3 rather than inventing a
+    level; only a nit is left without a priority.
+    """
+    return PRIORITY.get(normalize(sev))
+
+
 _PENALTY = {"blocker": 25, "major": 12, "minor": 4, "nit": 1}
 
 

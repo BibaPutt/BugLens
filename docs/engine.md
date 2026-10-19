@@ -63,6 +63,14 @@ machine gate **re-anchors it to the line that actually holds the quoted evidence
 the signed `line_drift`; only if the quote is not in the diff at all is the finding dropped.
 A real finding is never lost and never posted on the wrong line.
 
+**One defect, one comment.** The same problem often surfaces in more than one place: the PR-level
+`merge` lens restates a finding a file lens already made, and a security-flavoured bug is raised
+by both `security` and `correctness`. Before posting, findings are deduplicated by normalized
+evidence (falling back to `path:line:category`, then `path:title`). The kept finding lists every
+lens that found it (`lens: correctness, security`) and the other locations it appeared at
+(`also reported at app/admin.py:9`); the count of merged duplicates is named in the footer as
+`merged N duplicate finding(s)`. This is the difference between a review and a comment storm.
+
 `consensus: 3` in `.buglens.yml` runs three shuffled passes and posts only what wins the
 majority. It costs 3x tokens and is off by default.
 
@@ -168,6 +176,10 @@ For every changed file the engine looks up findings it posted before, and their 
 
 Open items are restated compactly; dismissed ones are suppressed; fixed ones are counted so
 the review does not re-litigate. Prior PRs that touched the same files add one line each.
+
+Recall is a **PR-bot** behaviour and only that. The IDE review of a file (`POST /api/v1/review`,
+the extension) is a fresh question about the code in front of you, so it never subtracts what a
+past review said: a bug that is still there is reported again.
 
 ## Learning from feedback
 
@@ -295,8 +307,10 @@ linters: auto             # [] = off; "auto" = detect installed; or [ruff, eslin
 post_check_run: true      # add a neutral BugLens check run
 check_run_conclusion: neutral   # failure only when required_status_check: true
 required_status_check: false
-pre_merge_checks: true    # deterministic pre-merge checklist in the walkthrough
+pre_merge_checks: true    # deterministic pre-merge table in the walkthrough
 request_changes: false    # opt-in: REQUEST_CHANGES when the verdict is blocking
+acknowledge_resolved: true  # reply on a thread when a push fixes the finding
+stale_comments: true      # collapse a confirmed-gone finding's comment as outdated
 check_ticket: true        # validate linked issues against the diff
 max_rounds: 10            # stop after this many reviews of one PR (0 = no cap)
 converge_rounds: 3        # from round 4 only re-review files whose diff changed
@@ -348,10 +362,35 @@ Config & infra → Tests → Docs), each with a one-line note: file count, how m
 any findings with their titles. This is pure path heuristics (`walkthrough.py`), no model
 call, so it reads like a reviewable stack for free.
 
-**Pre-merge checks.** A short deterministic checklist inside the walkthrough: whether test
-files moved with code changes, whether an issue is linked, whether secrets were flagged, and
-which linters ran. It states only what the engine actually observed. Turn it off with
-`pre_merge_checks: false`. It is informational and never blocks.
+**Pre-merge checks.** A deterministic table inside the walkthrough: whether test files moved with
+code changes, whether an issue is linked, whether secrets were flagged, and which linters ran.
+Each row carries a status (Pass / Warn / Info) and, when a check warns, the concrete fix. It
+states only what the engine actually observed. Turn it off with `pre_merge_checks: false`. It is
+informational and never blocks.
+
+**Review header.** The summary opens with the verdict and the one-line reason for it, then the
+model's `confidence` (0–100) and two independent risk axes: `merge` risk (does this change break
+something) and `security` risk. The reason must cite the findings and the risks must follow them;
+a clean review says so rather than inventing tension. The header also names the commit the review
+is scoped to (`checked up to <sha7>`), so a finding always has a claim you can re-check.
+
+## Comment lifecycle
+
+Inline comments from earlier rounds are tracked (fingerprint, path, comment id, node id, the SHA
+they were posted at). On a new push BugLens reconciles them against the new head:
+
+- **Addressed.** If the quoted evidence is gone from the file, the thread gets a short reply
+  naming the commit (`fixed in <sha7>`); the comment is not repeated. Turn this off with
+  `acknowledge_resolved: false`.
+- **Stale.** Only a finding whose evidence is confirmed gone is collapsed as outdated
+  (`stale_comments`, default on). A finding that is merely absent from this round (budget,
+  dedup, a quieter lens) is still open and is left untouched. A failed file fetch is treated as
+  unknown, never as resolved, so a network blip cannot retract a real finding.
+- **Still open.** Left exactly as it is; the new review does not restate it.
+
+The number of threads acknowledged and collapsed is named in the footer
+(`addressed findings acknowledged: N`, `stale comments retired: N`). This is how a long-lived PR
+stays readable instead of accumulating a wall of half-true comments.
 
 ## Cost and disclosure
 

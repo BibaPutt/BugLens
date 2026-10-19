@@ -87,6 +87,12 @@ read this, do one iteration from "Backlog", append to "Iteration log", commit.**
     arrive natively.
 21. **Extension**: merge-readiness score for the whole file, and inline VS Code `CodeAction`
     to apply a suggestion (not just copy).
+22. ~~**Review-grade output + precision (Wave K).**~~ **Shipped (iteration 26):** cross-lens
+    semantic dedup, a verdict-reason/confidence/merge+security-risk header scoped to a commit,
+    P1/P2/P3 labels, evidence-first finding bodies, the pre-merge checks table, and the
+    inline-comment lifecycle (acknowledge resolved, collapse only confirmed-gone findings). It also
+    opened new work: a real VS Code screenshot, naming *which* lens call failed (not just the
+    count), and retiring threads without leaving an empty review object behind.
 
 ## Iteration log
 | # | date | change | signal/inspiration | verified by |
@@ -117,6 +123,39 @@ read this, do one iteration from "Backlog", append to "Iteration log", commit.**
 | 23 | 2026-10-19 | **Wave G (W9)**: **code-object lensing** (`objects.py` pure units; `sev.apply_lens_caps`; `lens_caps` key): findings are grouped by the symbol they change and tagged with it (`<file>` fallback), and an opt-in per-lens cap stops one noisy lens from consuming the whole comment budget | Beat-plan Wave G; sharper grouping and a precision lever that never blocks | 238 tests pass (`test_objects`; severity + pipeline tests new) |
 | 24 | 2026-10-19 | **Wave H (W10)**: **ticket + production context** (`prodcontext.py` pure link/render; `integrations.py` optional self-hosted fetchers; `external_context` key): linked ticket text is matched to the changed symbols and optional Jira/Linear tickets plus Sentry/Datadog/PostHog signals join the prompt | Beat-plan Wave H; ties an issue to the code it touches; off by default, fail-soft, no new service | 271 tests pass (`test_prodcontext`, `test_integrations` new) |
 | 25 | 2026-10-19 | **Wave J**: **local MCP server** (`mcp_server.py`): stdlib-only JSON-RPC 2.0 over stdio exposing six read-only tools (`review` dry-run by default, `findings`, `recall`, `context`, `stats`, `repos`); one asyncio loop per session so the aiosqlite pool never crosses loops; no new dependency, no network | Beat-plan Wave J; lets Claude Desktop/Cursor read the engine locally without a token or a hosted service | 282 tests pass (`test_mcp_server` new) |
+| 26 | 2026-10-19 | **Wave K**: **review-grade output + precision** (`dedupe.py` pure; `severity.priority`; `store.posted_comments`; `github` comment management): verdict-reason/confidence/merge+security-risk header scoped to a commit, P1/P2/P3 labels, evidence-first finding bodies with a lens list and additional locations, pre-merge checks as a status+fix table, cross-lens semantic dedup, and an inline-comment lifecycle (acknowledge resolved, collapse only confirmed-gone findings). The live E2E then exposed three production bugs, fixed in the same iteration: the comment ledger and every `if db` store gate were dead in the webhook path (`db` never resolved), and the IDE path inherited prior-review recall and hid known bugs | Four pasted competitor reviews (Greptile/Bugbot/CodeRabbit/Macroscope) set the bar for readability and precision; SWR-Bench says precision is the limiter | 322 tests pass (`test_dedupe`, `test_github_comments`, `test_store_comments`, `test_review_grade` new); `e2e/e2e-report.md` records the 4-round live run |
+
+## Review-grade output + precision (iteration 26)
+A review now reads like the hosted reviewers, without adding a service.
+
+- **Header.** Verdict + a one-line reason that cites the findings, a `confidence` (0–100), and
+  independent `merge`/`security` risk, scoped to `checked up to <sha7>`. Missing model keys
+  degrade to empty; nothing is invented.
+- **Findings.** `P1 · Blocker · security` header, the quoted evidence above the prose, the lenses
+  that found it (`lens: correctness, security`) and the other anchors (`also reported at a.py:9`).
+- **Dedup.** `dedupe.py` folds the same defect from several lenses (merge restating a file lens,
+  security and correctness raising the same bug) into one comment by normalized evidence; the
+  count is named in the footer as `merged N duplicate finding(s)`. Runs after verify and after
+  merge-lens re-anchoring.
+- **Pre-merge checks** are a table (`| Check | Status | Detail |`) with a fix on every warning.
+- **Comment lifecycle.** `posted_comments` records each inline comment (fingerprint, path, line,
+  comment id, node id, head SHA). On a push, a finding whose evidence is verifiably gone gets a
+  `fixed in <sha7>` reply (`acknowledge_resolved`) or is collapsed as outdated (`stale_comments`);
+  a still-open finding is left alone and a failed fetch is never treated as resolved.
+
+### Three production bugs the E2E run exposed (same iteration)
+- **The ledger never recorded.** `_record_posted_comments` bailed on `if not db` and a webhook call
+  passes none, so no inline comment was ever tracked. Found by querying `posted_comments` after the
+  first live review: empty while three comments were on the PR.
+- **`db` was never resolved, so most persisted context was off in production.** `_review_pr` used
+  the raw argument, which silently skipped round counting, prior-review recall, suppression,
+  cross-push dedupe, the ripple fetch, drop rationales and the round-file ledger in the webhook path.
+  Fixed by resolving `db = db or store.db_path()` in `_review_pr`/`review_snippet`; proven live by a
+  round that named `3+ rounds without convergence` and `prior-review recall`, and by
+  `pr_round_files`/`drops` going from 0 rows to real ones.
+- **The IDE hid known bugs behind prior recall.** With the store reachable the snippet path fed PR
+  recall into the prompt, the model moved four real defects into an aside, and the panel scored the
+  file `88/100` with one warning. The IDE now reviews the file as it is (`score 32`, 4 issues).
 
 ## Local MCP server (iteration 25)
 `python -m buglens.mcp_server` speaks JSON-RPC 2.0 on stdio (protocol `2024-11-05`) with no `mcp`

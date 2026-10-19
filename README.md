@@ -57,9 +57,15 @@ Point the extension at your own backend with the `buglens.apiUrl` setting.
   shellcheck, hadolint and more) fold their output in as ground-truth findings the model cannot
   argue away. No Docker, no WSL, missing tools are simply skipped.
 - **Reads as a stack, not a dump.** The walkthrough groups the diff into ordered chapters
-  (schema, models, logic, api, ui, config, tests, docs) with a deterministic pre-merge
-  checklist, so you review the change bottom-up.
-- **One review per PR.** Never a comment storm; pushes don't duplicate comments.
+  (schema, models, logic, api, ui, config, tests, docs) with a deterministic pre-merge table
+  (status + fix per check), so you review the change bottom-up.
+- **Says what it thinks, in one line.** Every review opens with the verdict and why, a
+  confidence score, and separate merge and security risk, scoped to a named commit. Findings
+  carry a P1/P2/P3 priority and quote the evidence above the prose.
+- **One review per PR.** Never a comment storm. The same defect found by several lenses folds
+  into one comment that lists the lenses and the other places it shows up; pushes don't
+  duplicate it, a fixed finding's thread gets a "fixed in `<sha>`" note, and only a
+  confirmed-gone comment is collapsed as outdated. A still-open finding is never touched.
 - **Learns.** 👍/👎 reactions suppress repeated noise, inject learned advisories into future
   prompts, demote a lens this repo keeps rejecting, and propose `.buglens.yml` rules a human
   applies by hand. On merge it checks whether each finding was actually fixed.

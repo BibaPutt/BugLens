@@ -46,6 +46,10 @@ SUMMARY_SCHEMA = """{
   "summary": "3-5 sentence PR-level review",
   "score": <integer 0-100>,
   "verdict": "looks-good|needs-attention|blocking",
+  "verdict_reason": "one sentence on why this verdict, tied to the findings, never a restatement of the score",
+  "confidence": <integer 0-100, how sure you are of this overall review given the evidence>,
+  "merge_risk": "minimal|low|medium|high",
+  "security_risk": "none|low|medium|high",
   "highlights": ["most important things a human should look at, max 5"],
   "positives": ["what the PR does well, max 5"]
 }"""
@@ -109,6 +113,13 @@ You receive the verified findings across all files and lenses. Write a short,
 honest summary: what the PR does, the most important risks, and overall readiness.
 Do not mention findings that were verified away. Score 0-100 where 90+ is safe to
 merge, 70-89 has real but non-blocking issues, below 70 needs work.
+`verdict_reason` must point at the findings, never restate the score. `merge_risk` and
+`security_risk` must follow the findings you were given: with no finding touching an axis,
+that axis is at its lowest level. Never invent a risk or a confidence number you cannot
+support from the findings.
+All four keys are required on every response, including a clean review: a `verdict_reason`
+sentence, an integer `confidence` 0-100, and both risk levels. Say plainly when there is
+nothing to flag; do not omit a key because the answer is boring.
 Respond with a single valid JSON object and nothing else."""
 
 
