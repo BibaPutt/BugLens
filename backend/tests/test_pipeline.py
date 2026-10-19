@@ -1007,3 +1007,70 @@ async def test_adapters_run_off_the_event_loop(monkeypatch, db):
 
     assert adapters.scan in seen
 
+
+def _premortem_llm(items):
+    async def fake(messages, **kwargs):
+        if "pre-mortem on a pull request" in messages[0]["content"]:
+            return LLMResult(data={"items": items})
+        return await _fake_llm(messages, **kwargs)
+    return fake
+
+
+AUTH_PATCH = "@@ -0,0 +1,3 @@\n+def login(user, pw):\n+    return check(pw)\n+\n"
+
+
+async def test_risky_path_selects_deep_tier_and_renders_premortem(monkeypatch, db):
+    monkeypatch.setattr(llm, "complete_json", _premortem_llm([
+        {"title": "Auth bypass via empty password", "why": "check(pw) may accept ''",
+         "path": "src/auth/login.py", "line": 2},
+    ]))
+    _patch_github(monkeypatch, [{"filename": "src/auth/login.py", "status": "added", "patch": AUTH_PATCH}])
+
+    res = await pipeline.review_pr("o", "r", 1, dry_run=True, db=db, rules=load_rules())
+
+    assert any(n.startswith("review depth: deep") and "auth/security path" in n for n in res.engine_notes)
+    assert any(n.startswith("pre-mortem: 1") for n in res.engine_notes)
+    assert res.premortem == [{"title": "Auth bypass via empty password", "why": "check(pw) may accept ''",
+                              "path": "src/auth/login.py", "line": 2}]
+    md = pipeline.render_summary_md(res, load_rules())
+    assert "Pre-mortem: what could break in production" in md
+    assert "`src/auth/login.py:2`" in md
+
+
+async def test_plain_path_stays_quick_with_no_premortem(monkeypatch, db):
+    monkeypatch.setattr(llm, "complete_json", _premortem_llm([
+        {"title": "never used", "why": "w", "path": "a.py", "line": 2},
+    ]))
+    _patch_github(monkeypatch, [{"filename": "a.py", "status": "modified", "patch": PATCH}])
+
+    res = await pipeline.review_pr("o", "r", 1, dry_run=True, db=db)
+
+    assert any(n == "review depth: quick" for n in res.engine_notes)
+    assert res.premortem == []
+    assert not any(n.startswith("pre-mortem:") for n in res.engine_notes)
+
+
+async def test_premortem_drops_a_scenario_not_anchored_on_an_added_line(monkeypatch, db):
+    monkeypatch.setattr(llm, "complete_json", _premortem_llm([
+        {"title": "hallucinated", "why": "w", "path": "src/auth/login.py", "line": 99},
+    ]))
+    _patch_github(monkeypatch, [{"filename": "src/auth/login.py", "status": "added", "patch": AUTH_PATCH}])
+
+    res = await pipeline.review_pr("o", "r", 1, dry_run=True, db=db, rules=load_rules())
+
+    assert res.premortem == []
+    assert not any(n.startswith("pre-mortem:") for n in res.engine_notes)
+
+
+async def test_depth_triggers_off_reports_no_tier(monkeypatch, db):
+    monkeypatch.setattr(llm, "complete_json", _premortem_llm([]))
+    _patch_github(monkeypatch, [{"filename": "src/auth/login.py", "status": "added", "patch": AUTH_PATCH}])
+    rules = load_rules()
+    rules.depth_triggers = False
+
+    res = await pipeline.review_pr("o", "r", 1, dry_run=True, db=db, rules=rules)
+
+    assert not any(n.startswith("review depth:") for n in res.engine_notes)
+    assert res.premortem == []
+
+

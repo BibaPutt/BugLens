@@ -125,6 +125,7 @@ read this, do one iteration from "Backlog", append to "Iteration log", commit.**
 | 25 | 2026-10-19 | **Wave J**: **local MCP server** (`mcp_server.py`): stdlib-only JSON-RPC 2.0 over stdio exposing six read-only tools (`review` dry-run by default, `findings`, `recall`, `context`, `stats`, `repos`); one asyncio loop per session so the aiosqlite pool never crosses loops; no new dependency, no network | Beat-plan Wave J; lets Claude Desktop/Cursor read the engine locally without a token or a hosted service | 282 tests pass (`test_mcp_server` new) |
 | 26 | 2026-10-19 | **Wave K**: **review-grade output + precision** (`dedupe.py` pure; `severity.priority`; `store.posted_comments`; `github` comment management): verdict-reason/confidence/merge+security-risk header scoped to a commit, P1/P2/P3 labels, evidence-first finding bodies with a lens list and additional locations, pre-merge checks as a status+fix table, cross-lens semantic dedup, and an inline-comment lifecycle (acknowledge resolved, collapse only confirmed-gone findings). The live E2E then exposed three production bugs, fixed in the same iteration: the comment ledger and every `if db` store gate were dead in the webhook path (`db` never resolved), and the IDE path inherited prior-review recall and hid known bugs | Four pasted competitor reviews (Greptile/Bugbot/CodeRabbit/Macroscope) set the bar for readability and precision; SWR-Bench says precision is the limiter | 322 tests pass (`test_dedupe`, `test_github_comments`, `test_store_comments`, `test_review_grade` new); `e2e/e2e-report.md` records the 4-round live run |
 | 27 | 2026-10-19 | **Wave L**: **honest failure + IDE chat + event loop** (`pipeline.MARKER_ERROR` / `render_error_md`; IDE chat routing; `asyncio.to_thread`): a could-not-run notice when the PR files cannot be fetched (403/429/5xx), one permanent id-routed chat listener in the IDE panel, and `adapters.scan` moved off the event loop | An external architecture review raised eleven findings; three were false (adapters have a hard timeout, `file_cache` is age-pruned for every repo, `formatChatReply` escaping is correct at runtime) and the rest were polish. Only the fetch-failure silence, the per-send chat listeners, and the blocking linter call held | 328 tests pass (`test_pipeline` +5) |
+| 28 | 2026-10-19 | **Wave M**: **pre-mortem + depth tiers** (`premortem.py` pure; `pipeline._premortem`; `depth_triggers`/`premortem` keys): whole-token path risk (new route, migration, auth/security path, 200+ added lines) selects a deterministic quick/deep tier named in the footer, and the deep tier adds a collapsed "what could break in production" section of 2-4 scenarios, each kept only if anchored on a line the PR added | Greptile/Macroscope set the bar for a risk narrative rather than a flat finding list; the triggers keep the extra model call off ordinary diffs | 341 tests pass (`test_premortem` new, `test_pipeline` +4) |
 
 ## Review-grade output + precision (iteration 26)
 A review now reads like the hosted reviewers, without adding a service.
@@ -157,6 +158,19 @@ A review now reads like the hosted reviewers, without adding a service.
 - **The IDE hid known bugs behind prior recall.** With the store reachable the snippet path fed PR
   recall into the prompt, the model moved four real defects into an aside, and the panel scored the
   file `88/100` with one warning. The IDE now reviews the file as it is (`score 32`, 4 issues).
+
+## Pre-mortem and depth tiers (iteration 28)
+A risky diff gets one extra, bounded pass; an ordinary one does not pay for it.
+
+- **Triggers** (`premortem.triggers`) fire on whole path tokens only (never a substring, so
+  `author.py` never trips the auth rule): a new route, a migration, an auth/security path, or a
+  large change. Deterministic, ordered, deduped.
+- **Tier.** Any trigger is `deep`, else `quick`; `depth_triggers: false` pins `quick`. The tier is
+  named in the footer, with the triggers that caused it.
+- **Pre-mortem.** On `deep`, one bounded call asks the model to assume the PR merged and caused an
+  incident and name 2-4 concrete failure modes. `premortem.select` keeps only scenarios that cite a
+  path and an added line the PR touched, deduped and capped at 4, so an unanchored or invented line
+  never ships. Rendering is collapsed; the footer names the count.
 
 ## Honest failure, IDE chat, event loop (iteration 27)
 An external review of the engine raised eleven findings. Eight were wrong or cosmetic; these are the

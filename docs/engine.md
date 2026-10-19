@@ -393,6 +393,28 @@ The number of threads acknowledged and collapsed is named in the footer
 (`addressed findings acknowledged: N`, `stale comments retired: N`). This is how a long-lived PR
 stays readable instead of accumulating a wall of half-true comments.
 
+## Pre-mortem and depth tiers
+
+Some diffs carry more production risk than others. BugLens scores that deterministically and
+spends one extra model call only where it is worth it:
+
+- **Triggers.** `premortem.triggers` fires on a whole **path token**, never a substring, so
+  `author.py` never trips the auth rule: a **new route** (`route`/`controller`/`handler`/`endpoint`,
+  in a file that is added or renamed), a **migration** (`migration`/`alembic`), an
+  **auth/security path** (`auth`/`token`/`session`/`password`/`permission`/`crypto`/`security`), or
+  a **large change** (200+ added lines).
+- **Tier.** Any trigger selects the `deep` tier, otherwise `quick`. The tier is always named in
+  the footer (`review depth: deep (triggers: new route, auth/security path)`), and
+  `depth_triggers: false` pins a repo to `quick`.
+- **Pre-mortem.** On `deep`, one bounded call asks the model to assume the PR merged and caused an
+  incident, then name 2-4 concrete failure modes. **Every scenario must cite a path and an added
+  line the PR actually touched**: `premortem.select` drops anything unanchored, so a fabricated
+  line never ships and a scenario is never relocated onto real code. With nothing anchored, there
+  is no section at all. `premortem: false` turns it off; `MAX_ITEMS` is 4.
+
+The section renders collapsed (`Pre-mortem: what could break in production`) under the
+walkthrough, and the count is disclosed in the footer (`pre-mortem: N scenario(s)`).
+
 ## Cost and disclosure
 
 Every consolidated review ends with a compact `Engine:` line: engine calls, failed calls,

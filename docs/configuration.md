@@ -114,6 +114,13 @@ thread and names the commit when a push fixes the finding, and `stale_comments` 
 collapses a confirmed-gone finding's comment as outdated. Both act only when the quoted evidence
 is verifiably absent from the new head; a still-open finding is never touched.
 
+Two keys govern whether a PR gets the extra pre-mortem pass (see
+[engine.md](engine.md#pre-mortem-and-depth-tiers)): `depth_triggers` (default `true`) lets a risky
+surface (a new route, a migration, an auth/security path, or a large diff) select the `deep` tier,
+and `premortem` (default `true`) adds the bounded "what could break in production" section on that
+tier. `depth_triggers: false` pins every PR to `quick`; the chosen tier is always named in the
+footer.
+
 Two keys are where a human applies a learned suggestion (see
 [engine.md](engine.md#learning-from-feedback)): `ignore_paths:` takes globs for a scope the team
 keeps dismissing, and `focus:` takes the lens allow-list, so dropping a down-voted lens means

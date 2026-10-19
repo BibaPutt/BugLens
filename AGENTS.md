@@ -50,6 +50,7 @@ user says **"final"**. Never print or commit the token.
 | `integrations.py` | optional self-hosted external context: `configured` (env gate), `collect` (Jira/Linear ticket text + Sentry/Datadog/PostHog signals), fail-soft, off by default, own `_http()` pool closed in lifespan |
 | `objects.py` | pure code-object units: `build_units` (group a file's added lines by enclosing changed symbol, `<file>` fallback), `symbol_for` (tag a finding with its unit), `unit_summary` (footer string) |
 | `walkthrough.py` | deterministic Change-Stack grouping: classify changed files into ordered chapters (schema→models→logic→api→ui→config→tests→docs), per-chapter notes; no model |
+| `premortem.py` | pure risk triggers + depth tier: `triggers` (whole-token path match + added-line volume), `tier` (`quick`/`deep`), `select` (keeps only scenarios anchored on an added line), `render_md`; no model |
 | `chat.py` | threaded `@buglens` commands: `parse_command` routing, `answer` (deterministic Change-Stack for `explain`, one bounded `complete_text` for `why`/`ask`), `handoff_prompts` Fix-All, `handle_command` posts an in-thread reply |
 | `github.py` | REST **and GraphQL**: PR files (paginated), file content, inline review, upsert comment, check runs (create/update/find with annotations), `closingIssuesReferences`, issue fetch, PR/commit history; **review-comment management**: `list_review_comments`, `reply_review_comment`, `update_review_comment`, `delete_review_comment`, `minimize_comment` (GraphQL, never raises) |
 | `store.py` | SQLite: run idempotency, findings, **file_cache**, **repo_index**/**file_prs** (code graph + file history), delivery dedupe, outcomes → suppression, **drops** (verifier rationale) and learned lens/dismissal stats, **posted_comments** (comment lifecycle ledger: fingerprint → path/line/comment_id/node_id/head_sha) |
@@ -103,6 +104,10 @@ Wiring: `routers/webhook.py` → `pipeline.review_pr`; `routers/review.py` → `
       verifying the rest were false: a **could-not-run** notice when the PR files cannot be
       fetched (`403`/`429`/`5xx`), one permanent id-routed chat listener in the IDE panel, and
       deterministic adapters executed off the event loop.
+      iteration 28 (Wave M) = pre-mortem + depth tiers: a pure `premortem.py` picks a
+      deterministic `quick`/`deep` tier from whole-token path risk (new route, migration,
+      auth/security path, large diff) and, on `deep`, renders 2-4 production failure scenarios
+      each anchored to a real added line (the tier and count are named in the footer).
       **Full plan:
       `../temp/intel/buglens-v2-beat-plan-2026-10.md` (Waves A–J).** Inline reply chat shipped;
       multi-model consensus (second model) still open)*
@@ -259,6 +264,23 @@ identity. `POST /api/v1/feedback` and `/engine/stats?repo=` expect `owner/repo`.
   the prompt: the user asked about this file, now, and recall there demoted four real defects to a
   prose aside and scored the file clean. The PR bot keeps recall (it must not repeat itself across
   rounds); the IDE gets code-graph context only.
+
+## Pre-mortem and depth tiers (iteration 28, do not regress)
+- **`premortem.py` is pure.** Files in, tier/items/markdown out. No model, no I/O. The model call
+  lives in `pipeline._premortem` (deep tier only); the module only decides and validates.
+- **Triggers match whole path tokens.** `_tokens` splits each segment on non-alphanumerics and the
+  needle must equal a token: `auth` must never fire on `author.py`. New-route triggers require
+  status `added`/`renamed`; the others apply to any status; `large change` needs 200+ added lines
+  across the PR. Adding a needle means adding a *token*, not a substring.
+- **`select` is the honesty gate.** An item survives only when its `path` is in the reviewed set
+  and its `line` is in `fd.added_line_numbers`; items are deduped by `(path, line)` and capped at
+  `MAX_ITEMS` (4). Never relocate an unanchored scenario, never pad. `render_md([])` returns `[]`.
+- **The tier is always named.** `_engine_notes` prints `review depth: <tier>` (plus
+  `(triggers: ...)` when non-empty) and `pre-mortem: N scenario(s)`; the depth note is emitted
+  only while `depth_triggers` is on (the iteration-16 "name every depth change" rule). Setting
+  `depth_triggers: false` pins `quick` and emits no depth note.
+- **It never blocks and never runs in the IDE.** Like every other layer it is advisory; the snippet
+  path does not run a pre-mortem.
 
 ## Failure notice and IDE chat (iteration 27, do not regress)
 - **A review that could not run says so.** When `github.get_pr_files` raises (403/429/5xx),

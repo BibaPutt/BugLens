@@ -23,7 +23,7 @@ import uuid
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 
-from . import adapters, checks, dedupe, github, indexer, integrations, learn, llm, objects, prodcontext, prompts, recall, secretscan, store, symbols, tickets, verify, walkthrough
+from . import adapters, checks, dedupe, github, indexer, integrations, learn, llm, objects, premortem, prodcontext, prompts, recall, secretscan, store, symbols, tickets, verify, walkthrough
 from . import lenses as L
 from .context import build_context, extract_symbols, language_of
 from .diff import FileDiff, DiffLine, ADD, choose_paths, parse_patch
@@ -72,6 +72,7 @@ class ReviewResult:
     context_sources: list[str] = field(default_factory=list)
     review_effort: int = 1
     ticket_summary: str = ""
+    premortem: list[dict] = field(default_factory=list)
     wall_seconds: float = 0.0
     round_no: int = 0
     converging: bool = False
@@ -266,7 +267,9 @@ def _engine_notes(rules: Rules, verified, all_findings: list[dict],
                   ticket: bool, graph_files: int, recall: bool, calls: int, failures: int,
                   converging: bool, linters_run: list[str] | None = None,
                   ripple: int = 0, learned_scopes: int = 0,
-                  demoted_lenses: int = 0) -> list[str]:
+                  demoted_lenses: int = 0, depth_tier: str = "",
+                  depth_triggers: list[str] | None = None,
+                  premortem_items: int = 0) -> list[str]:
     """Plain-language disclosure of every optional layer that changed review depth.
 
     No feature may alter review depth silently, the non-consensual-defaults lesson."""
@@ -298,6 +301,13 @@ def _engine_notes(rules: Rules, verified, all_findings: list[dict],
         notes.append(f"partial: {failures}/{calls} model call(s) failed, some files may be under-reviewed")
     if converging:
         notes.append(f"{rules.converge_rounds}+ rounds without convergence")
+    if depth_tier:
+        note = f"review depth: {depth_tier}"
+        if depth_triggers:
+            note += f" (triggers: {', '.join(depth_triggers)})"
+        notes.append(note)
+    if premortem_items:
+        notes.append(f"pre-mortem: {premortem_items} scenario(s)")
     return notes
 
 
@@ -434,6 +444,39 @@ async def _summarise(findings: list[dict], files: list[str], lenses_run: list[st
 
 
 _RISK_LEVELS = ("minimal", "none", "low", "medium", "high")
+
+
+async def _premortem(findings: list[dict], files: list[str],
+                     fired: list[str]) -> tuple[list[dict], dict]:
+    """One bounded model call for the deep tier's production pre-mortem.
+
+    Returns ``(items, usage)``. The model proposes failure scenarios; ``premortem.select`` is the
+    gate that keeps only the ones anchored on a line this PR added, so a scenario is never
+    relocated or invented. Any failure yields an empty list: a pre-mortem is a bonus, never a
+    source of fabricated claims.
+    """
+    digest = "\n".join(
+        f"- [{sev.label(f.get('severity')).upper()}/{f.get('category')}] "
+        f"{f.get('path')}:{f.get('line')} {f.get('title')}"
+        for f in findings
+    )
+    messages = [
+        {"role": "system", "content": prompts.PREMORTEM_SYSTEM},
+        {"role": "user", "content": prompts.build_premortem_prompt(digest, files, fired)},
+    ]
+    try:
+        result = await llm.complete_json(messages, max_tokens=700)
+        raw = result.data.get("items") or []
+        items = [
+            {"title": str(it.get("title") or "").strip(),
+             "why": str(it.get("why") or "").strip(),
+             "path": str(it.get("path") or "").strip(),
+             "line": it.get("line")}
+            for it in raw if isinstance(it, dict)
+        ]
+        return items, result.usage
+    except Exception:
+        return [], {}
 
 
 def _risk_level(value) -> str:
@@ -739,6 +782,8 @@ def render_summary_md(res: ReviewResult, rules: Rules) -> str:
         lines.append(" · ".join(meta))
     lines += ["", res.summary or ""]
     lines += _walkthrough_md(res, rules)
+    if res.premortem:
+        lines += premortem.render_md(res.premortem)
     if res.highlights:
         lines += ["", "### Highlights"]
         lines += [f"- {h}" for h in res.highlights]
@@ -1261,6 +1306,17 @@ async def _review_pr(owner: str, repo: str, pr_number: int, *, base_sha: str | N
     highlights, s_positives = s["highlights"], s["positives"]
     usage = _merge_usage(usage, s["usage"])
 
+    # Depth tier: a new route, a migration, an auth/security path or a large diff is where "works
+    # on my machine" turns into a 03:00 page, so those PRs get one extra bounded pass. The triggers
+    # are deterministic and the chosen tier is always named in the footer, never applied silently.
+    depth_triggers_fired = premortem.triggers(picked) if getattr(rules, "depth_triggers", True) else []
+    depth_tier = premortem.tier(bool(getattr(rules, "depth_triggers", True)), depth_triggers_fired)
+    pm_items: list[dict] = []
+    if depth_tier == "deep" and getattr(rules, "premortem", True) and picked:
+        proposed, pm_usage = await _premortem(kept, [fd.path for fd in picked], depth_triggers_fired)
+        usage = _merge_usage(usage, pm_usage)
+        pm_items = premortem.select(proposed, picked)
+
     # A review where every model call failed must not report itself as a clean pass. The
     # old behaviour posted "looks-good / 100" and the team merged on a review that never ran.
     calls, failures = _lens_health(usage)
@@ -1301,12 +1357,16 @@ async def _review_pr(owner: str, repo: str, pr_number: int, *, base_sha: str | N
                                    graph_files, bool(recall_text), calls, failures, converging,
                                    linters_run=linters_run, ripple=len(ripple_items),
                                    learned_scopes=len(learn_scopes),
-                                   demoted_lenses=len(demoted)),
+                                   demoted_lenses=len(demoted),
+                                   depth_tier=depth_tier if getattr(rules, "depth_triggers", True) else "",
+                                   depth_triggers=depth_triggers_fired,
+                                   premortem_items=len(pm_items)),
         change_stack=walkthrough.build_change_stack(picked, kept),
         pre_merge=_pre_merge_checks(picked, ticket_summary, linters_run,
                                     "secrets" in lenses_run, round_no, rules),
         verdict_reason=s["verdict_reason"], confidence=s["confidence"],
         merge_risk=s["merge_risk"], security_risk=s["security_risk"],
+        premortem=pm_items,
     )
 
     try:                                   # findings are best-effort; never cost the review
